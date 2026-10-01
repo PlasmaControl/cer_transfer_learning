@@ -28,6 +28,8 @@ import numpy as np
 import seaborn as sns
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 sns.set_style("whitegrid")
 
 
@@ -44,7 +46,7 @@ def main():
     print(f"{'dataset':>10} {'C':>4} {'T_end':>6} {'W':>4} "
           f"{'median':>8} {'p95':>8} {'max':>10} {'line_med':>9}")
     for fp, lab in zip(args.file, args.label):
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = int(d["end_index"])
         spec = np.asarray(d["input"][:, :end, :], dtype=np.float64)
         med = np.median(spec, axis=-1, keepdims=True)

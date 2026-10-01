@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_eval_passive
-#SBATCH --output=cer_eval_passive.out
-#SBATCH --error=cer_eval_passive.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -17,8 +17,10 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer
-
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 
 # Passive evaluation: ACTIVE-trained checkpoints on PASSIVE spectrograms
@@ -30,10 +32,10 @@ trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 # a study eval, but the OFFICIAL numbers use only shots from the active
 # TEST split to keep test discipline.
 srun $RUN python -u eval_checkpoint.py \
-    --checkpoint /scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_active_ft.pt \
-    --list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_passive_val.txt \
-    --diagnose --out /scratch/gpfs/ps9551/passive_micer/cer_transfer/eval_nstx_passive.csv
+    --checkpoint cer_ckpts/nstx_active_ft.pt \
+    --list splits/nstx_passive_val.txt \
+    --diagnose --out eval_nstx_passive.csv
 srun $RUN python -u eval_checkpoint.py \
-    --checkpoint /scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstxu_active_hop2.pt \
-    --list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_passive_val.txt \
-    --diagnose --out /scratch/gpfs/ps9551/passive_micer/cer_transfer/eval_nstxu_passive.csv
+    --checkpoint cer_ckpts/nstxu_active_hop2.pt \
+    --list splits/nstxu_passive_val.txt \
+    --diagnose --out eval_nstxu_passive.csv

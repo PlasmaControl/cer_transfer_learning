@@ -30,6 +30,8 @@ from pathlib import Path
 
 import numpy as np
 from joblib import load
+
+from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
 
 from cer_transfer.beamstate import beam_state
@@ -57,7 +59,7 @@ def main():
     pred = d["pred"].reshape(C, Tn, -1)
     y = d["y"].reshape(C, Tn, -1)
 
-    js = load(args.bg_file, mmap_mode="r")
+    js = load(data_path(args.bg_file), mmap_mode="r")
     end = valid_end(js)
     spec = np.asarray(js["input"][:, :end, :], dtype=np.float32)
     st = beam_state(args.bg_file, args.fg_file)

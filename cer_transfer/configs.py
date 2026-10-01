@@ -11,6 +11,27 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+import os
+
+# Root of the discharge files. Split lists and the default data directories
+# hold paths relative to it; absolute paths are used as they are.
+DATA_ROOT = Path(os.environ.get("CER_DATA_ROOT", "."))
+
+
+def data_path(p) -> Path:
+    """Resolve a joblib path from a split list or the CLI against CER_DATA_ROOT."""
+    p = Path(p)
+    return p if p.is_absolute() else DATA_ROOT / p
+
+
+def list_entry(p) -> str:
+    """Path as written into a split list: relative to CER_DATA_ROOT when the
+    file lies inside it, else absolute."""
+    p = Path(p).resolve()
+    try:
+        return str(p.relative_to(DATA_ROOT.resolve()))
+    except ValueError:
+        return str(p)
 from typing import Optional, Sequence
 
 
@@ -200,8 +221,8 @@ D3D_FULL = register(MachineConfig(
     input_channel_indices=None,
     chord_indices=None,
     stem_w_pools=2,  # ~400-600 bins -> ~100-150 at trunk entry
-    train_dir=Path("/scratch/gpfs/EKOLEMEN/ps9551/passive_micer/training_set_30"),
-    val_dir=Path("/scratch/gpfs/EKOLEMEN/ps9551/passive_micer/test_set_30"),
+    train_dir=Path("training_set_30"),   # relative to CER_DATA_ROOT
+    val_dir=Path("test_set_30"),
 ))
 
 D3D_SUBSET = register(MachineConfig(
@@ -209,8 +230,8 @@ D3D_SUBSET = register(MachineConfig(
     n_raw_channels=80,
     input_channel_indices=tuple(range(0, 80, 5)),
     chord_indices=(0, 1, 2, 3, 4, 5, 6, 16, 17, 18, 19, 20, 21, 32, 33, 34, 35),
-    train_dir=Path("/scratch/gpfs/EKOLEMEN/ps9551/passive_micer/training_set_30"),
-    val_dir=Path("/scratch/gpfs/EKOLEMEN/ps9551/passive_micer/test_set_30"),
+    train_dir=Path("training_set_30"),   # relative to CER_DATA_ROOT
+    val_dir=Path("test_set_30"),
 ))
 
 # Fill in once NSTX CHERS data files exist. Variable W is handled

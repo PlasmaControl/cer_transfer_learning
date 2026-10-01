@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_train_d3d
-#SBATCH --output=cer_train_d3d.out
-#SBATCH --error=cer_train_d3d.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -24,9 +24,12 @@ RUN="pixi run --frozen"
 # conda activate ml-env
 # RUN=""
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root (contains train.py)
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/d3d_full_batchnorm.pt
+CKPT=cer_ckpts/d3d_full_batchnorm.pt
 mkdir -p "$(dirname "$CKPT")"
 
 RESUME=""

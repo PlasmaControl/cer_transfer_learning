@@ -23,6 +23,8 @@ import numpy as np
 import seaborn as sns
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 from cer_transfer.beamstate import beam_state, valid_end
 
 from cer_transfer.figures.common import FRAME_HZ
@@ -31,7 +33,7 @@ FS = FRAME_HZ  # overridden by --fs
 
 
 def spec_of(fp, chord):
-    d = load(fp, mmap_mode="r")
+    d = load(data_path(fp), mmap_mode="r")
     end = valid_end(d)
     return np.asarray(d["input"][chord, :end, :], dtype=np.float32)
 

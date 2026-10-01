@@ -11,7 +11,8 @@
 #   gallery/bo_<shot>_bg.npz + _bg.txt + _fg.txt       beam-off pool
 #     (scripts/run_passive_validation.sh produces them)
 #   gallery/beamoff_verified*.csv, gallery/edge_pool_*.csv
-# Tangency radii of the lines of sight: data/chord_radii/chords_Rtan_<shot>.csv
+# Per-chord plot coordinate (chord,x CSV, e.g. tangency radii): gallery/chords_Rtan_<shot>.csv
+#   (override the folder with CHORD_X=<dir>)
 set -euo pipefail
 cd "$(dirname "$0")/.."   # repository root
 
@@ -20,7 +21,7 @@ OFF="-0.235"              # experimental time of frame 0 (recording pre-trigger)
 K51="--k 0.992 1.171"     # calibration factors of the 51-chord NSTX model
 XL='$R_\mathrm{tan}$ (m)'
 H=gallery/137711
-R=data/chord_radii
+R=${CHORD_X:-gallery}      # folder with chords_Rtan_<shot>.csv
 
 L137711=$(grep 137711 splits/nstx_val.txt)
 B137711=$(grep 137711 splits/nstx_passive_val.txt)

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_gallery
-#SBATCH --output=cer_gallery.out
-#SBATCH --error=cer_gallery.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -18,8 +18,10 @@
 # Requires current cer_transfer.figures.recon_composite + cer_transfer.figures.gallery +
 # eval_checkpoint.py in the repo root.
 module purge
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer
-# clear leftovers from pre-rename runs so only current names remain
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 find gallery -name "fig[23]_*" -delete 2>/dev/null
 find gallery -name "fig2_reconstruction.*" -delete 2>/dev/null
 pixi run python -u -m cer_transfer.figures.gallery --n 20 --seed 42 --recipe ft --out gallery

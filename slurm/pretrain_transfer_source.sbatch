@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_pretrain_d3d_source
-#SBATCH --output=cer_pretrain_d3d_source.out
-#SBATCH --error=cer_pretrain_d3d_source.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -24,13 +24,16 @@ RUN="pixi run --frozen"
 # conda activate ml-env
 # RUN=""
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root (contains train.py)
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 # Transfer-source pretrain: the D3D model whose trunk goes to NSTX/NSTX-U.
 # Config: GroupNorm + mlp head (ablation winners) + stem/trunk backbone
 # (feature_width) with machine-specific W-pooling; scheduler on val_score.
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/d3d_transfer_source.pt
+CKPT=cer_ckpts/d3d_transfer_source.pt
 mkdir -p "$(dirname "$CKPT")"
 
 # --resume is safe: checkpoint bundles best_score, so a requeued job can

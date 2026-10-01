@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_ft_hop2_noD3D_nstxu_zdf
-#SBATCH --output=cer_ft_hop2_noD3D_nstxu_zdf.out
-#SBATCH --error=cer_ft_hop2_noD3D_nstxu_zdf.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -22,22 +22,25 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer
-
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 
 # Control: NSTX-scratch -> NSTX-U (no D3D anywhere in the chain).
 # Isolates D3D's contribution vs hop 2 (nstx_ft source). Identical recipe.
-SRC=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_scratch.pt
-OUT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstxu_hop2_noD3D_zdf.pt
+SRC=cer_ckpts/nstx_scratch.pt
+OUT=cer_ckpts/nstxu_hop2_noD3D_zdf.pt
+RESUME=""; [ -f "$OUT" ] && RESUME="--resume"   # requeue: continue from the saved checkpoint
 mkdir -p "$(dirname "$OUT")"
 
-srun $RUN python -u finetune.py \
+srun $RUN python -u finetune.py $RESUME \
     --source-checkpoint "$SRC" \
     --machine nstxu \
     --checkpoint "$OUT" \
-    --train-list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_train.txt \
-    --val-list   /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_val.txt \
+    --train-list splits/nstxu_train.txt \
+    --val-list   splits/nstxu_val.txt \
     --head-type mlp \
     --transfer-readouts \
     --subseq-len 64 \

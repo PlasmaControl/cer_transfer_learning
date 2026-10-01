@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_eval_zdf
-#SBATCH --output=cer_eval_zdf.out
-#SBATCH --error=cer_eval_zdf.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=8
@@ -15,7 +15,10 @@
 #                   (b) small-list --dump-preds -> dark-behavior check
 # Compare CSVs/scores against the official counterparts afterwards.
 module purge
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 mkdir -p zdf_eval
 head -30 splits/nstx_val.txt > zdf_eval/darkcheck.txt
 

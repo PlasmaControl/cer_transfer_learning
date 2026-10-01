@@ -59,6 +59,10 @@ def main():
                         "end_index of the target dataset (NSTX-U median: "
                         "144 -> use 128 or 64)")
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument("--resume", action="store_true",
+                   help="continue an interrupted run from an existing --checkpoint: "
+                        "loads weights, normalization statistics, best score, epoch "
+                        "and optimizer state, and skips the probe phase (requeue-safe)")
     p.add_argument("--transfer-readouts", action="store_true",
                    help="warm-start the ENTIRE head incl. per-chord readouts "
                         "from the source (requires equal chord count and "
@@ -93,53 +97,67 @@ def main():
     set_random_seed(args.seed)  # deterministic kernels off (see training.py)
     target = get_machine(args.machine)
 
-    ckpt = load_checkpoint(args.source_checkpoint)
-    cfg_dict = dict(ckpt["model_config"])
-    if args.head_type is not None:
-        cfg_dict["head_type"] = args.head_type
-    if args.moment_features:
-        cfg_dict["moment_features"] = True
-    model_cfg = ModelConfig(**cfg_dict)
-    src_machine = ckpt["machine"]["name"]
-    if ckpt["machine"]["n_raw_channels"] != target.n_raw_channels and \
-            model_cfg.norm == "batch":
-        print("note: BatchNorm running stats will be re-estimated on "
-              f"{target.name} data")
-
-    src_in = (ckpt["machine"]["n_raw_channels"]
-              if ckpt["machine"]["input_channel_indices"] is None
-              else len(ckpt["machine"]["input_channel_indices"]))
-    channel_mismatch = src_in != target.n_input_channels
-    stem_arch = model_cfg.feature_width is not None
-    if channel_mismatch and not stem_arch:
-        raise SystemExit(
-            f"source backbone expects {src_in} input channels, "
-            f"{target.name} provides {target.n_input_channels}, and the "
-            "source was trained in legacy mode (feature_width=None), so the "
-            "trunk cannot be separated from channel identity. Retrain the "
-            "source with feature_width set (stem/trunk mode)."
-        )
-
-    model = build_model(target, model_cfg)
-    transfer_backbone(model, ckpt["backbone_state"],
-                      reset_norm_running_stats=True,
-                      trunk_only=stem_arch)
-    parts = ["trunk" if stem_arch else "backbone"]
-    if args.transfer_readouts:
-        transfer_full_head(model.head, ckpt["head_state"],
-                           reset_norm_running_stats=True)
-        parts.append("full head (readouts warm-started)")
-        fresh_desc = "stem re-initialized" if stem_arch else "nothing fresh"
-    elif stem_arch and model_cfg.head_type in ("linear", "mlp"):
-        transfer_head_trunk(model.head, ckpt["head_state"],
-                            reset_norm_running_stats=True)
-        parts.append("head trunk")
-        fresh_desc = (f"stem and {target.n_chords}-chord readouts "
-                      "re-initialized")
+    resume = args.resume and args.checkpoint.exists()
+    resumed = None
+    if resume:
+        resumed = load_checkpoint(args.checkpoint)
+        model_cfg = ModelConfig(**resumed["model_config"])
+        model = build_model(target, model_cfg)
+        model.load_state_dict(resumed["model_state"])
+        best = resumed["best_score"]
+        print(f"resumed from {args.checkpoint} (best epoch {resumed['epoch']}, "
+              f"best {'none' if best is None else f'{best:.4f}'}, "
+              f"continuing at epoch {resumed['epoch'] + 1}; probe phase skipped)")
+        ckpt = None
     else:
-        fresh_desc = f"{target.n_chords}-chord readouts re-initialized"
-    print(f"transferred {' + '.join(parts)} {src_machine} -> {target.name}; "
-          f"{fresh_desc}")
+        ckpt = load_checkpoint(args.source_checkpoint)
+    cfg_dict = dict(ckpt["model_config"]) if ckpt is not None else {}
+    if not resume:
+        if args.head_type is not None:
+            cfg_dict["head_type"] = args.head_type
+        if args.moment_features:
+            cfg_dict["moment_features"] = True
+        model_cfg = ModelConfig(**cfg_dict)
+        src_machine = ckpt["machine"]["name"]
+        if ckpt["machine"]["n_raw_channels"] != target.n_raw_channels and \
+                model_cfg.norm == "batch":
+            print("note: BatchNorm running stats will be re-estimated on "
+                  f"{target.name} data")
+
+        src_in = (ckpt["machine"]["n_raw_channels"]
+                  if ckpt["machine"]["input_channel_indices"] is None
+                  else len(ckpt["machine"]["input_channel_indices"]))
+        channel_mismatch = src_in != target.n_input_channels
+        stem_arch = model_cfg.feature_width is not None
+        if channel_mismatch and not stem_arch:
+            raise SystemExit(
+                f"source backbone expects {src_in} input channels, "
+                f"{target.name} provides {target.n_input_channels}, and the "
+                "source was trained in legacy mode (feature_width=None), so the "
+                "trunk cannot be separated from channel identity. Retrain the "
+                "source with feature_width set (stem/trunk mode)."
+            )
+
+        model = build_model(target, model_cfg)
+        transfer_backbone(model, ckpt["backbone_state"],
+                          reset_norm_running_stats=True,
+                          trunk_only=stem_arch)
+        parts = ["trunk" if stem_arch else "backbone"]
+        if args.transfer_readouts:
+            transfer_full_head(model.head, ckpt["head_state"],
+                               reset_norm_running_stats=True)
+            parts.append("full head (readouts warm-started)")
+            fresh_desc = "stem re-initialized" if stem_arch else "nothing fresh"
+        elif stem_arch and model_cfg.head_type in ("linear", "mlp"):
+            transfer_head_trunk(model.head, ckpt["head_state"],
+                                reset_norm_running_stats=True)
+            parts.append("head trunk")
+            fresh_desc = (f"stem and {target.n_chords}-chord readouts "
+                          "re-initialized")
+        else:
+            fresh_desc = f"{target.n_chords}-chord readouts re-initialized"
+        print(f"transferred {' + '.join(parts)} {src_machine} -> {target.name}; "
+              f"{fresh_desc}")
 
     ft_cfg = FinetuneConfig(
         batch_size=args.batch_size, num_epochs=args.epochs, seed=args.seed,
@@ -162,29 +180,39 @@ def main():
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     # Target stats from target data — never inherited from source.
-    norm_stats = {k: v.to(device) for k, v in
-                  compute_norm_stats(train_loader.dataset,
-                                     tuple(target.targets)).items()}
-
-    # ---- Phase 1: probe — freeze transferred parts; train head + fresh stem
-    for prm in model.backbone.parameters():
-        prm.requires_grad_(False)
-    for prm in model.backbone.stem_parameters():
-        prm.requires_grad_(True)
-    probe_cfg = FinetuneConfig(**{**ft_cfg.__dict__,
-                                  "num_epochs": ft_cfg.probe_epochs,
-                                  "patience": ft_cfg.probe_epochs})
+    if resume:
+        norm_stats = {k: v.to(device) for k, v in resumed["norm_stats"].items()}
+    else:
+        norm_stats = {k: v.to(device) for k, v in
+                      compute_norm_stats(train_loader.dataset,
+                                         tuple(target.targets)).items()}
     csv_logger = CSVLogger(args.checkpoint.with_suffix(".metrics.csv"))
-    probe = Trainer(
-        model, target, model_cfg, probe_cfg,
-        optimizer=optim.AdamW(
-            list(model.head.parameters()) + model.backbone.stem_parameters(),
-            lr=ft_cfg.probe_lr, weight_decay=ft_cfg.weight_decay),
-        device=device, checkpoint_path=args.checkpoint, norm_stats=norm_stats,
-        loggers=[csv_logger], log_extra={"phase": "probe"},
-    )
-    print(f"--- phase 1: linear probe ({ft_cfg.probe_epochs} epochs) ---")
-    probe_best = probe.fit(train_loader, val_loader)
+
+    if resume:
+        probe_best = resumed["best_score"]
+        start_epoch = resumed["epoch"] + 1
+        optimizer_state = resumed.get("optimizer_state")
+        scheduler_state = resumed.get("scheduler_state")
+    else:
+        start_epoch, optimizer_state, scheduler_state = 0, None, None
+        # ---- Phase 1: probe — freeze transferred parts; train head + fresh stem
+        for prm in model.backbone.parameters():
+            prm.requires_grad_(False)
+        for prm in model.backbone.stem_parameters():
+            prm.requires_grad_(True)
+        probe_cfg = FinetuneConfig(**{**ft_cfg.__dict__,
+                                      "num_epochs": ft_cfg.probe_epochs,
+                                      "patience": ft_cfg.probe_epochs})
+        probe = Trainer(
+            model, target, model_cfg, probe_cfg,
+            optimizer=optim.AdamW(
+                list(model.head.parameters()) + model.backbone.stem_parameters(),
+                lr=ft_cfg.probe_lr, weight_decay=ft_cfg.weight_decay),
+            device=device, checkpoint_path=args.checkpoint, norm_stats=norm_stats,
+            loggers=[csv_logger], log_extra={"phase": "probe"},
+        )
+        print(f"--- phase 1: linear probe ({ft_cfg.probe_epochs} epochs) ---")
+        probe_best = probe.fit(train_loader, val_loader)
 
     # ---- Phase 2: full fine-tune with discriminative LRs ----------------
     for prm in model.backbone.parameters():
@@ -201,12 +229,15 @@ def main():
         optimizer=optim.AdamW(param_groups,
                               weight_decay=ft_cfg.weight_decay),
         device=device, checkpoint_path=args.checkpoint, norm_stats=norm_stats,
-        initial_best_score=probe_best,  # never regress below the probe
+        initial_best_score=probe_best,  # never regress below the probe / resumed best
+        start_epoch=start_epoch, optimizer_state=optimizer_state,
+        scheduler_state=scheduler_state,
         loggers=[csv_logger], log_extra={"phase": "finetune"},
     )
     print("--- phase 2: full fine-tune ---")
     best = ft.fit(train_loader, val_loader)
-    print(f"best val score: {best:.4f} (probe: {probe_best:.4f})")
+    print(f"best val score: {best:.4f} (start: "
+          f"{'none' if probe_best is None else f'{probe_best:.4f}'})")
 
 
 if __name__ == "__main__":

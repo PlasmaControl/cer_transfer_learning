@@ -16,7 +16,7 @@ import pandas as pd
 import seaborn as sns
 from joblib import load
 
-from cer_transfer.configs import get_machine
+from cer_transfer.configs import get_machine, data_path
 
 sns.set_style("whitegrid")
 UNITS = {"ti": "keV", "vtor": "km/s"}
@@ -45,7 +45,7 @@ def _read_files(args, machine):
         files = files[: args.limit]
     scale = np.asarray(machine.target_scale, dtype=np.float64)
     for fp in files:
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = int(d["end_index"])
         if end <= 0:
             continue

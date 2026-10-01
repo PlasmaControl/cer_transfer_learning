@@ -11,13 +11,14 @@ pandas = ">=2.0"
 tqdm = ">=4.66"
 seaborn = ">=0.13"
 
-# torch stack from PyPI with bundled CUDA runtime (no module load / system
-# CUDA needed; works on Stellar's A100 nodes). torch and torchaudio are
-# resolved together and frozen in pixi.lock — this is what prevents the
-# undefined-symbol ABI mismatch that broke the old ml-env.
+# torch stack from the PyTorch wheel index with bundled CUDA runtime (no
+# module load / system CUDA needed). torch and torchaudio are resolved
+# together and frozen in pixi.lock, which prevents ABI mismatches between them.
 [pypi-dependencies]
-torch = ">=2.4,<2.6"
-torchaudio = ">=2.4,<2.6"
+# CUDA 12.8 wheels: required for Blackwell GPUs (B200, sm_100); they also run
+# on A100/H100. PyPI's default wheels (cu126) stop at sm_90.
+torch = { version = ">=2.7", index = "https://download.pytorch.org/whl/cu128" }
+torchaudio = { version = ">=2.7", index = "https://download.pytorch.org/whl/cu128" }
 torcheval = ">=0.0.7"
 tensorboard = ">=2.16"  # only needed for --tensorboard
 line-profiler = ">=4.1"  # only needed for cer_transfer.analysis.profile_lines
@@ -27,7 +28,7 @@ ray = { version = ">=2.30,<3", extras = ["tune"] }
 train = "python -u train.py"
 finetune = "python -u finetune.py"
 tune = "python -u tune.py"
-smoke = "python -c 'import torch, ray, numpy, joblib; print(torch.__version__, torch.cuda.is_available())'"
+smoke = "python -c 'import torch, ray, numpy, joblib; print(torch.__version__, torch.version.cuda, torch.cuda.is_available(), torch.cuda.get_arch_list())'"
 eval = "python -u eval_checkpoint.py"
 figs = "bash scripts/make_figs.sh"
 test = "python -m tests.smoke"

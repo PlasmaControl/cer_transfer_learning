@@ -20,6 +20,8 @@ from pathlib import Path
 
 import numpy as np
 from joblib import load
+
+from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
 
 from cer_transfer.dark import dark_mask
@@ -43,7 +45,7 @@ def main():
     off = 0
     dark_pred, dark_sig, plasma_sig = [], [], []
     for fp in files:
-        s = load(fp, mmap_mode="r")
+        s = load(data_path(fp), mmap_mode="r")
         end = valid_end(s)
         spec = np.asarray(s["input"][:, :end, :], dtype=np.float32)
         tgt = np.asarray(s["target"][:, :end, :], dtype=np.float32)

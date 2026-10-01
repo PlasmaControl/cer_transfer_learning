@@ -16,7 +16,7 @@ import torch
 from torch import optim
 from torch.utils.data import DataLoader
 
-from cer_transfer.configs import ModelConfig, TrainConfig, get_machine
+from cer_transfer.configs import ModelConfig, TrainConfig, get_machine, data_path
 from cer_transfer.data import (FullShotSampler, PerShotBatchSampler,
                                compute_tail_weights,
                                ShotDataset, worker_init_fn)
@@ -26,11 +26,12 @@ from cer_transfer.training import (Trainer, load_checkpoint, set_random_seed)
 
 
 def resolve_files(dir_or_none, list_or_none, machine_dir, what):
-    """A split is either a directory glob or an explicit file list (one
-    absolute path per line; '#' comments allowed). Lists win over dirs."""
+    """A split is either a directory glob or an explicit file list (one path
+    per line, relative to CER_DATA_ROOT or absolute; '#' comments allowed).
+    Lists win over dirs."""
     if list_or_none is not None:
         lines = Path(list_or_none).read_text().splitlines()
-        files = [Path(ln.strip()) for ln in lines
+        files = [data_path(ln.strip()) for ln in lines
                  if ln.strip() and not ln.strip().startswith("#")]
         missing = [f for f in files if not f.exists()]
         if missing:
@@ -43,7 +44,7 @@ def resolve_files(dir_or_none, list_or_none, machine_dir, what):
             f"in configs.py — pass --{what}-list (a cer_transfer.datasets.make_splits list; "
             f"recommended, excludes curated-out shots) or --{what}-dir."
         )
-    d = Path(dir_or_none or machine_dir)
+    d = data_path(dir_or_none or machine_dir)
     return sorted(d.glob("*.joblib"))
 
 

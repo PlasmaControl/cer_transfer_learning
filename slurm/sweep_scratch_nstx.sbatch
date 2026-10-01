@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_sweep_nstx
-#SBATCH --output=cer_sweep_nstx_%a.out
-#SBATCH --error=cer_sweep_nstx_%a.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -18,9 +18,10 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer
-
-# NSTX scratch-baseline sweep. Hypothesis: per-shot batches on NSTX = ~2
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 # chunks -> noisy gradients cap the model well below the label ceiling
 # (0.765 vs 0.898/0.992). Arms probe effective batch (via gradient
 # accumulation) and LR around the D3D-tuned reference.
@@ -33,7 +34,7 @@ A=${ACCUM[$SLURM_ARRAY_TASK_ID]}
 L=${LR[$SLURM_ARRAY_TASK_ID]}
 D=${DROP[$SLURM_ARRAY_TASK_ID]}
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_sweep_a${A}_lr${L}_d${D}.pt
+CKPT=cer_ckpts/nstx_sweep_a${A}_lr${L}_d${D}.pt
 mkdir -p "$(dirname "$CKPT")"
 RESUME=""
 [ -f "$CKPT" ] && RESUME="--resume"
@@ -43,8 +44,8 @@ trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 srun $RUN python -u train.py \
     --machine nstx \
     --checkpoint "$CKPT" \
-    --train-list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_train.txt \
-    --val-list   /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_val.txt \
+    --train-list splits/nstx_train.txt \
+    --val-list   splits/nstx_val.txt \
     --head-type mlp \
     --norm group \
     --feature-width 128 \

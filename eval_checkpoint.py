@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cer_transfer.configs import ModelConfig, get_machine
+from cer_transfer.configs import ModelConfig, data_path, get_machine
 from cer_transfer.data import ShotDataset
 from cer_transfer.models import build_model
 from cer_transfer.training import denormalize_mu_sigma, load_checkpoint
@@ -75,7 +75,7 @@ def main():
     print(f"checkpoint: {args.checkpoint.name} (machine={machine.name}, "
           f"best={ckpt.get('best_score')}, epoch={ckpt.get('epoch')})")
 
-    files = [Path(ln.strip()) for ln in args.list.read_text().splitlines()
+    files = [data_path(ln.strip()) for ln in args.list.read_text().splitlines()
              if ln.strip() and not ln.strip().startswith("#")]
     if args.limit:
         files = files[: args.limit]

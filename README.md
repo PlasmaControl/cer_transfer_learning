@@ -35,7 +35,6 @@ cer_transfer/        package
 scripts/             shell drivers (figures, beam-off validation)
 slurm/               job files for every training/evaluation run of the study
 splits/              discharge lists defining the train/val/test splits and subsets
-data/chord_radii/    tangency radii of the NSTX lines of sight (plot coordinate)
 tests/smoke.py       end-to-end check of the non-torch modules on synthetic data
 docs/                notes
 ```
@@ -59,6 +58,8 @@ One joblib file per discharge with
 | `target_error` | (chords, frames, 2) | their quoted 1σ uncertainties |
 | `end_index` | int | number of valid frames; ≤ 0 means the whole recording |
 
+File paths in lists and on the command line are resolved against the environment
+variable `CER_DATA_ROOT` unless absolute (`cer_transfer.configs.data_path`).
 Machines are defined in `cer_transfer/configs.py`: `d3d` (80 channels),
 `nstx` (51 chords, one array), `nstx_active` / `nstx_passive` (48
 flux-surface-aligned chords of the foreground / background array; the labels
@@ -110,8 +111,34 @@ fit across the beam switch, and the same comparison with the beam on;
 
 **Figures**: `scripts/make_figs.sh` renders the manuscript figures from the
 dumps listed in its header. The per-chord plot coordinate is the tangency
-radius of each line of sight (`data/chord_radii/`); without a coordinate file
+radius of each line of sight, given as a `chord,x` CSV per discharge
+(`gallery/chords_Rtan_<shot>.csv`, not part of the repository); without a coordinate file
 the chord index is used.
+
+## Running on another cluster
+
+Job files are location-independent: all paths inside the repository (`cer_ckpts/`,
+`splits/`) are relative, and the jobs find the repository root whether submitted from
+it or from `slurm/`, and write their logs to `slurm/logs/<job-name>.out` / `.err`
+themselves, so the submission directory does not matter.
+Fine-tuning and pre-training jobs continue from their checkpoint when requeued
+(`--resume` is added automatically if the output checkpoint exists). A run that
+finished (early stopping or epoch limit) is marked in its checkpoint and is not
+resumed; `--force-resume` overrides that for a deliberate continuation. What has to be adapted:
+
+1. Set `CER_DATA_ROOT` to the directory that holds the discharge-file folders
+   (`chers_nstx_labeled/`, `chers_nstx_active/`, `chers_nstx_passive/`,
+   `training_set_30/`, `test_set_30/`, ...). All split lists and the default
+   DIII-D directories are relative to it; `sbatch` passes the variable on to
+   the jobs. Do not regenerate the splits for a new machine: that would
+   reshuffle train/val/test and break comparability with earlier runs.
+2. `#SBATCH` headers: add `--partition`/`--account` as required, change
+   `--mail-user`. Keep `--signal=B:USR1@300 --requeue`; training resumes from
+   the checkpoint after preemption.
+4. GPU: the runs assume an A100 (`--batch-size 256`, `--subseq-len 256`); on a
+   smaller card halve the batch size and set `--accumulation-steps 2`.
+4. `pixi install` with `PIXI_CACHE_DIR` on local disk; `pixi run smoke` must report
+   `torch.cuda.is_available() True`; `pixi run test` checks the figure/analysis modules.
 
 ## Conventions
 

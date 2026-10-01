@@ -29,6 +29,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from cer_transfer.configs import data_path
 from cer_transfer.figures.common import chord_coordinate, sorted_chords
 import seaborn as sns
 
@@ -148,7 +149,7 @@ def main():
     spec = None
     if args.shot is not None:
         from joblib import load
-        s = load(args.shot, mmap_mode="r")
+        s = load(data_path(args.shot), mmap_mode="r")
         end = int(s["end_index"])
         spec = {cc: np.asarray(s["input"][cc, :end, :], dtype=np.float32)
                 for cc in tr_chords}

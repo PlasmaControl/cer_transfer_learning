@@ -7,7 +7,6 @@ __pycache__/
 cer_ckpts/
 gallery/
 figs/
-results/
 audit/
 zdf_eval/
 *.npz
@@ -15,7 +14,8 @@ zdf_eval/
 *.log
 *.out
 *.err
-slurm/logs/
+slurm/logs/*
+!slurm/logs/.gitkeep
 *.metrics.csv
 
 # editors

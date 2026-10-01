@@ -14,6 +14,8 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -34,7 +36,7 @@ def main():
         shots = frames = pts = subs = 0
         for fp in files:
             try:
-                d = load(fp, mmap_mode="r")
+                d = load(data_path(fp), mmap_mode="r")
                 end = int(d["end_index"])
                 if end <= 0:
                     continue

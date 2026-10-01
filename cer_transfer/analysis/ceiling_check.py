@@ -24,7 +24,7 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
-from cer_transfer.configs import get_machine
+from cer_transfer.configs import get_machine, data_path
 
 
 def main():
@@ -83,7 +83,7 @@ def main():
     hon = [[] for _ in range(n_t)]    # (y, sigma, amp) for honest ceilings
 
     for fp in files:
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = int(d["end_index"])
         if end <= 0:
             continue

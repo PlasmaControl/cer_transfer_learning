@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_scaling_nstxu_zdf
-#SBATCH --output=cer_scaling_nstxu_%a_zdf.out
-#SBATCH --error=cer_scaling_nstxu_%a_zdf.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -22,7 +22,10 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 
@@ -33,22 +36,23 @@ trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 SIZES=(n25 n50 n100 n200 full)
 SZ=${SIZES[$SLURM_ARRAY_TASK_ID]}
 
-SRC=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_ft.pt
-OUT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstxu_scaling_${SZ}_zdf.pt
+SRC=cer_ckpts/nstx_ft.pt
+OUT=cer_ckpts/nstxu_scaling_${SZ}_zdf.pt
+RESUME=""; [ -f "$OUT" ] && RESUME="--resume"   # requeue: continue from the saved checkpoint
 mkdir -p "$(dirname "$OUT")"
 
 if [ "$SZ" = "full" ]; then
-    TRAIN_LIST=/scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_train.txt
+    TRAIN_LIST=splits/nstxu_train.txt
 else
-    TRAIN_LIST=/scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_train_${SZ}.txt
+    TRAIN_LIST=splits/nstxu_train_${SZ}.txt
 fi
 
-srun $RUN python -u finetune.py \
+srun $RUN python -u finetune.py $RESUME \
     --source-checkpoint "$SRC" \
     --machine nstxu \
     --checkpoint "$OUT" \
     --train-list "$TRAIN_LIST" \
-    --val-list   /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstxu_val.txt \
+    --val-list   splits/nstxu_val.txt \
     --transfer-readouts \
     --subseq-len 64 \
     --head-type mlp \

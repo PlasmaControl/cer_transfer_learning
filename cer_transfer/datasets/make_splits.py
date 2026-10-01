@@ -29,7 +29,7 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
-from cer_transfer.configs import get_machine
+from cer_transfer.configs import get_machine, list_entry
 
 
 def shot_summary(fp: Path, machine):
@@ -120,7 +120,7 @@ def main():
 
     def write(name, paths):
         f = args.out / f"{args.machine}_{name}.txt"
-        f.write_text("\n".join(str(p.resolve()) for p in sorted(paths)) + "\n")
+        f.write_text("\n".join(list_entry(p) for p in sorted(paths)) + "\n")
         print(f"  {f}  ({len(paths)} shots)")
 
     write("train", train)

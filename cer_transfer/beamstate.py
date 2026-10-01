@@ -16,6 +16,8 @@ from __future__ import annotations
 import numpy as np
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 PRE = 47  # recording pre-trigger frames (235 ms): pre-plasma
 
 
@@ -28,7 +30,7 @@ def valid_end(d):
 
 
 def _brightness(fp):
-    d = load(fp, mmap_mode="r")
+    d = load(data_path(fp), mmap_mode="r")
     end = valid_end(d)
     tot = np.asarray(d["input"][:, :end, :], np.float32).sum(axis=(0, 2))
     pre = min(PRE, end - 1)

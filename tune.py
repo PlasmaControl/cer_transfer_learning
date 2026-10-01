@@ -23,7 +23,7 @@ from ray.tune.schedulers import ASHAScheduler
 from torch import optim
 from torch.utils.data import DataLoader
 
-from cer_transfer.configs import ModelConfig, TrainConfig, get_machine
+from cer_transfer.configs import ModelConfig, TrainConfig, get_machine, data_path
 from cer_transfer.logging_utils import CSVLogger
 from cer_transfer.data import (FullShotSampler, PerShotBatchSampler,
                                ShotDataset, worker_init_fn)
@@ -40,9 +40,9 @@ def objective(config, machine_name: str, train_dir: str, val_dir: str):
     set_random_seed(SEED)  # per-trial process
     machine = get_machine(machine_name)
 
-    train_files = sorted(Path(train_dir).glob("*.joblib"))
+    train_files = sorted(data_path(train_dir).glob("*.joblib"))
     random.Random(SEED).shuffle(train_files)          # same split every trial
-    val_files = sorted(Path(val_dir).glob("*.joblib"))[:N_VAL_FILES]
+    val_files = sorted(data_path(val_dir).glob("*.joblib"))[:N_VAL_FILES]
 
     train_set = ShotDataset(train_files[:N_TRAIN_FILES], machine,
                             subseq_len=256)

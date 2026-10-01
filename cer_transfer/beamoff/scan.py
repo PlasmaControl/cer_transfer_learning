@@ -15,6 +15,8 @@ from pathlib import Path
 
 import numpy as np
 from joblib import load
+
+from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
 
 
@@ -34,7 +36,7 @@ def main():
 
     rows = []
     for fp in files:
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = valid_end(d)
         spec = np.asarray(d["input"][:, :end, :], dtype=np.float32)
         tgt = np.asarray(d["target"][:, :end, 0], dtype=np.float32)

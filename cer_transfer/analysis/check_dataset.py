@@ -22,14 +22,14 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
-from cer_transfer.configs import ModelConfig, get_machine
+from cer_transfer.configs import ModelConfig, get_machine, data_path
 
 REQUIRED_KEYS = ("input", "target", "target_error", "end_index")
 
 
 def check_file(fp: Path, machine, min_w: int, rng) -> tuple[list, dict]:
     errors, stats = [], {}
-    d = load(fp, mmap_mode="r")
+    d = load(data_path(fp), mmap_mode="r")
     for k in REQUIRED_KEYS:
         if k not in d:
             return [f"missing key '{k}'"], stats

@@ -16,7 +16,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cer_transfer.configs import get_machine
+from cer_transfer.configs import data_path, get_machine, list_entry
 
 
 def main():
@@ -27,7 +27,7 @@ def main():
     a = p.parse_args()
 
     m = get_machine("d3d")
-    pool = sorted(Path(m.train_dir).glob("*.joblib"))
+    pool = sorted(data_path(m.train_dir).glob("*.joblib"))
     print(f"pool: {len(pool)} files in {m.train_dir}")
     order = np.random.default_rng(a.seed).permutation(len(pool))
     a.out.mkdir(parents=True, exist_ok=True)
@@ -38,7 +38,7 @@ def main():
         if f.exists():
             raise SystemExit(f"{f} exists -- lists are write-once; "
                              "delete by hand only if no run used it")
-        sel = sorted(str(pool[i].resolve()) for i in order[:k])
+        sel = sorted(list_entry(pool[i]) for i in order[:k])
         f.write_text(f"# seed={a.seed} nested prefix of permutation, "
                      f"pool={len(pool)}\n" + "\n".join(sel) + "\n")
         print(f"  {f}  ({k} shots)")

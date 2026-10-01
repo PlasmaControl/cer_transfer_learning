@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_head_ablation
-#SBATCH --output=cer_head_%a.out
-#SBATCH --error=cer_head_%a.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -24,7 +24,10 @@ RUN="pixi run --frozen"
 # conda activate ml-env
 # RUN=""
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root (contains train.py)
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 # Head-capacity ablation on DIII-D: linear vs mlp vs full, same seed and
 # hyperparameters. (Completed via individual runs; kept for reproducibility.)
@@ -32,7 +35,7 @@ cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root (conta
 HEAD_TYPES=(linear mlp full)
 HEAD=${HEAD_TYPES[$SLURM_ARRAY_TASK_ID]}
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/d3d_ablation_${HEAD}.pt
+CKPT=cer_ckpts/d3d_ablation_${HEAD}.pt
 mkdir -p "$(dirname "$CKPT")"
 RESUME=""
 [ -f "$CKPT" ] && RESUME="--resume"

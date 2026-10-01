@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_ft_hop1_nstx_zdf
-#SBATCH --output=cer_ft_hop1_nstx_zdf.out
-#SBATCH --error=cer_ft_hop1_nstx_zdf.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -17,14 +17,18 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 # Hop 1: D3D -> NSTX. Trunk + head trunk transferred; fresh 51-channel stem
 # + readouts. 10.4k labeled shots => near-full-scale training: short probe,
 # trunk LRs ~1/10 of full LR (not the scarce-data 1/100 defaults).
 
-SRC=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/d3d_transfer_source.pt
-OUT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_ft_zdf.pt
+SRC=cer_ckpts/d3d_transfer_source.pt
+OUT=cer_ckpts/nstx_ft_zdf.pt
+RESUME=""; [ -f "$OUT" ] && RESUME="--resume"   # requeue: continue from the saved checkpoint
 mkdir -p "$(dirname "$OUT")"
 
 # ZDF variant: identical to the official recipe + --zero-dark-frames
@@ -35,12 +39,12 @@ mkdir -p "$(dirname "$OUT")"
 
 trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 
-srun $RUN python -u finetune.py \
+srun $RUN python -u finetune.py $RESUME \
     --source-checkpoint "$SRC" \
     --machine nstx \
     --checkpoint "$OUT" \
-    --train-list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_train.txt \
-    --val-list   /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_val.txt \
+    --train-list splits/nstx_train.txt \
+    --val-list   splits/nstx_val.txt \
     --head-type mlp \
     --subseq-len 64 \
     --probe-epochs 5 \

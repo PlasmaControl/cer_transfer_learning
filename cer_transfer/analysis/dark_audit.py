@@ -11,6 +11,8 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 p = argparse.ArgumentParser()
 p.add_argument("--list", type=Path, required=True)
 p.add_argument("--sample", type=int, default=200)
@@ -23,7 +25,7 @@ files = [files[i] for i in rng.permutation(len(files))[: a.sample]]
 
 r_dark, r_plasma, boundary = [], [], 0
 for f in files:
-    d = load(f, mmap_mode="r")
+    d = load(data_path(f), mmap_mode="r")
     end = int(d["end_index"])
     spec = np.asarray(d["input"][:, :end, :], dtype=np.float32)
     tgt = np.asarray(d["target"][:, :end, :], dtype=np.float32)

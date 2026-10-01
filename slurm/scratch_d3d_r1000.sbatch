@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_scratch_d3d_r1000
-#SBATCH --output=cer_scratch_d3d_r1000.out
-#SBATCH --error=cer_scratch_d3d_r1000.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -17,15 +17,18 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 # From-scratch CONTROL at 1000 D3D discharges: equal-data counterpart to
 # finetune_d3d_r1000. Same recipe as the D3D source pretrain
 # (pretrain_transfer_source.sbatch), subset list only. Full-data
 # counterpart = cer_ckpts/d3d_transfer_source.pt.
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/d3d_scratch_r1000.pt
-LIST=/scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/d3d_train_r1000.txt
+CKPT=cer_ckpts/d3d_scratch_r1000.pt
+LIST=splits/d3d_train_r1000.txt
 mkdir -p "$(dirname "$CKPT")"
 [ -f "$LIST" ] || { echo "missing $LIST (run cer_transfer.datasets.make_d3d_subsets)"; exit 1; }
 RESUME=""

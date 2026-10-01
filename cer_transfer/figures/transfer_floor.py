@@ -25,6 +25,8 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from cer_transfer.configs import data_path
+
 sns.set_style("whitegrid")
 
 
@@ -39,7 +41,7 @@ def label_floor(list_path: Path, scale, limit: int = 0):
         files = files[:limit]
     acc = None
     for fp in files:
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = int(d["end_index"])
         err = np.asarray(d["target_error"][:, :end, :], dtype=np.float32)
         if acc is None:

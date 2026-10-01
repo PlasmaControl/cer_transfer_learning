@@ -27,6 +27,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from joblib import load
+
+from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
 
 sns.set_style("whitegrid")
@@ -48,7 +50,7 @@ def load_pred(npz):
 def brightness(fp):
     """Dark-subtracted total line brightness per frame, its dark noise,
     the fitted-frame mask, and the valid length."""
-    d = load(fp, mmap_mode="r")
+    d = load(data_path(fp), mmap_mode="r")
     end = valid_end(d)
     spec = np.asarray(d["input"][:, :end, :], dtype=np.float32)
     tot = spec.sum(axis=(0, 2))

@@ -1,7 +1,7 @@
 #!/bin/bash
 #SBATCH --job-name=cer_scratch_nstx_zdf
-#SBATCH --output=cer_scratch_nstx_zdf.out
-#SBATCH --error=cer_scratch_nstx_zdf.err
+#SBATCH --output=/dev/null   # redirected below into slurm/logs/
+#SBATCH --error=/dev/null
 #SBATCH --open-mode=append
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
@@ -21,7 +21,10 @@ module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 RUN="pixi run --frozen"
 
-cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root
+cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
+mkdir -p slurm/logs
+LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
+exec >>"$LOG.out" 2>>"$LOG.err"
 
 # Control: NSTX trained from scratch (no D3D transfer). Comparisons:
 #   vs hop 1 (nstx_ft.pt)      -> does D3D pretraining help at 10k shots?
@@ -29,7 +32,7 @@ cd /scratch/gpfs/ps9551/passive_micer/cer_transfer            # repo root
 #                                 contribution to the final NSTX-U model.
 # Same architecture/config as the transfer arms.
 
-CKPT=/scratch/gpfs/ps9551/passive_micer/cer_transfer/cer_ckpts/nstx_scratch.pt
+CKPT=cer_ckpts/nstx_scratch.pt
 mkdir -p "$(dirname "$CKPT")"
 RESUME=""
 [ -f "$CKPT" ] && RESUME="--resume"
@@ -39,8 +42,8 @@ trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 srun $RUN python -u train.py \
     --machine nstx \
     --checkpoint "$CKPT" \
-    --train-list /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_train.txt \
-    --val-list   /scratch/gpfs/ps9551/passive_micer/cer_transfer/splits/nstx_val.txt \
+    --train-list splits/nstx_train.txt \
+    --val-list   splits/nstx_val.txt \
     --head-type mlp \
     --norm group \
     --feature-width 128 \

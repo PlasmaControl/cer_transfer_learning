@@ -12,7 +12,7 @@ set -uo pipefail
 cd "$(dirname "$0")/.."   # repository root
 
 RUN="pixi run python -u"
-BASE=/scratch/gpfs/ps9551/passive_micer
+BASE=${CER_DATA_ROOT:?set CER_DATA_ROOT to the data root}
 D51=$BASE/chers_requested
 DFG=$BASE/chers_requested_active
 DBG=$BASE/chers_requested_passive

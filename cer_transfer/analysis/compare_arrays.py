@@ -36,11 +36,13 @@ import numpy as np
 import seaborn as sns
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 sns.set_style("whitegrid")
 
 
 def shot_stats(fp: Path, rail: float):
-    d = load(fp, mmap_mode="r")
+    d = load(data_path(fp), mmap_mode="r")
     end = int(d["end_index"])
     if end <= 0:
         return None

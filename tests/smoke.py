@@ -66,6 +66,9 @@ def build(tmp: Path):
         (tmp / nm).mkdir()
         (tmp / nm / "chers_141710.joblib").write_bytes((tmp / f"chers_{nm}.joblib").read_bytes())
         (tmp / f"{nm}.txt").write_text(str(tmp / nm / "chers_141710.joblib"))
+    # lists with CER_DATA_ROOT-relative entries (as in splits/)
+    (tmp / "bg_rel.txt").write_text("bg/chers_141710.joblib")
+    (tmp / "fg_rel.txt").write_text("fg/chers_141710.joblib")
     (tmp / "gallery").mkdir()
     (tmp / "gallery" / "bo_141710_bg.npz").write_bytes((tmp / "bg.npz").read_bytes())
     (tmp / "gallery" / "bo_141710_bg.txt").write_text(str(tmp / "bg" / "chers_141710.joblib"))
@@ -115,19 +118,23 @@ def main():
         "beamoff.passive_moments": ["--shot", "S", "--bg", f"{tmp}/bg.npz", "--bg-file", bgf, "--fg-file", fgf],
         "beamoff.analyze": ["--shot", "S", "--bg", f"{tmp}/bg.npz", "--fg", f"{tmp}/fg.npz", "--bg-file", bgf, "--fg-file", fgf],
         "analysis.coverage": ["--preds", f"{tmp}/bg.npz", "--k", "1", "1"],
+        # relative list entries resolved against CER_DATA_ROOT
+        "beamoff.scan_verified@relative": ["--bg-list", f"{tmp}/bg_rel.txt", "--fg-list", f"{tmp}/fg_rel.txt",
+                                           "--out", f"{tmp}/verified_rel.csv"],
     }
-    env = {**os.environ, "PYTHONPATH": str(ROOT), "MPLBACKEND": "Agg"}
+    env = {**os.environ, "PYTHONPATH": str(ROOT), "MPLBACKEND": "Agg", "CER_DATA_ROOT": str(tmp)}
     failed = []
-    for mod, args in cmds.items():
+    for key, args in cmds.items():
+        mod = key.split("@")[0]
         extra = common if mod in ("figures.event_3d", "figures.event_panels", "figures.event_waterfall",
                                   "figures.event_profiles", "figures.recon_composite", "figures.beamoff_traces",
                                   "figures.passive_spectra", "figures.shot_compare") else []
         r = subprocess.run([sys.executable, "-m", f"cer_transfer.{mod}", *args, *extra],
                            capture_output=True, text=True, cwd=ROOT, env=env)
         status = "ok  " if r.returncode == 0 else "FAIL"
-        print(f"{status} cer_transfer.{mod}")
+        print(f"{status} cer_transfer.{key}")
         if r.returncode:
-            failed.append(mod)
+            failed.append(key)
             print(r.stderr[-1500:])
     print(f"\n{len(cmds) - len(failed)}/{len(cmds)} modules passed")
     sys.exit(1 if failed else 0)

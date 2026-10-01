@@ -21,6 +21,8 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
+from cer_transfer.configs import data_path
+
 
 def main():
     p = argparse.ArgumentParser()
@@ -44,7 +46,7 @@ def main():
     amps = {"dark": [], "beam_off_plasma": [], "outside_not_dark": [],
             "labeled": []}
     for fp in files:
-        d = load(fp, mmap_mode="r")
+        d = load(data_path(fp), mmap_mode="r")
         end = int(d["end_index"])
         spec = np.asarray(d["input"][:, :end, :], dtype=np.float32)
         tgt = np.asarray(d["target"][:, :end, :], dtype=np.float32)

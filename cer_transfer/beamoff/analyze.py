@@ -21,6 +21,8 @@ from pathlib import Path
 
 import numpy as np
 from joblib import load
+
+from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
 
 
@@ -62,7 +64,7 @@ def main():
     pf, sf, yf, Tf = arr(args.fg)
     T = min(Tb, Tf)
 
-    d = load(args.bg_file, mmap_mode="r")
+    d = load(data_path(args.bg_file), mmap_mode="r")
     end = valid_end(d)
     spec = np.asarray(d["input"][:, :end, :], dtype=np.float32)
     T = min(T, end)
