@@ -1,0 +1,24 @@
+# environments and caches
+.pixi/
+__pycache__/
+*.pyc
+
+# data, checkpoints and run outputs (large or machine-specific)
+cer_ckpts/
+gallery/
+figs/
+results/
+audit/
+zdf_eval/
+*.npz
+*.joblib
+*.log
+*.out
+*.err
+slurm/logs/
+*.metrics.csv
+
+# editors
+.vscode/
+.idea/
+.DS_Store
