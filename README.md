@@ -27,11 +27,13 @@ cer_transfer/        package
   training.py        trainer, checkpoints, normalization
   losses.py, augment.py, dark.py, logging_utils.py
   beamstate.py       beam on/off detection from the spectra of both arrays
+  inference.py       load a checkpoint and run it on one discharge; inference-only export
   figures/           manuscript figures (run as python -m cer_transfer.figures.<name>)
   analysis/          calibration, label-noise ceilings, coverage, audits, receptive field
   beamoff/           beam-off validation: scanning, edge-frame test, pooling
   datasets/          split lists and nested training subsets
 
+notebooks/demo.ipynb minimal demo: model on one discharge vs conventional fits
 scripts/             shell drivers (figures, beam-off validation)
 slurm/               job files for every training/evaluation run of the study
 splits/              discharge lists defining the train/val/test splits and subsets
@@ -43,9 +45,21 @@ Everything runs from the repository root; the package needs no installation.
 
 ## Installation
 
-The environment is managed with [pixi](https://pixi.sh): `pixi install`, then
-prefix commands with `pixi run`. Tasks: `pixi run train`, `pixi run finetune`,
-`pixi run eval`, `pixi run figs`, `pixi run test`.
+One command sets everything up on any cluster:
+```bash
+scripts/setup_env.sh --data-root /path/to/data --pixi-cache /local/disk/pixi-cache --kernel
+```
+It installs [pixi](https://pixi.sh) if missing, creates the environment (`pixi
+install`, PyTorch with CUDA 12.8 wheels, no module loads), checks that the split
+lists resolve under the data root, runs the smoke tests, and with `--kernel`
+registers the Jupyter kernel "cer-transfer (pixi)" for JupyterLab portals such as
+Open OnDemand (the kernel starts through `pixi run`, so it follows the environment
+wherever it lives, and carries `CER_DATA_ROOT`). Finally it prints the two `export`
+lines for your shell profile.
+
+Afterwards prefix commands with `pixi run`. Tasks: `pixi run train`, `pixi run
+finetune`, `pixi run eval`, `pixi run figs`, `pixi run test`, `pixi run smoke`
+(torch/CUDA check on a GPU node).
 
 ## Data format
 
@@ -65,6 +79,24 @@ Machines are defined in `cer_transfer/configs.py`: `d3d` (80 channels),
 flux-surface-aligned chords of the foreground / background array; the labels
 are always the active-array fits), and their NSTX-U counterparts. Lists of
 files (`splits/*.txt`, one path per line) select the data for every run.
+
+## Demo
+
+`notebooks/demo.ipynb` downloads an inference checkpoint and one discharge from
+the release, runs the model on CPU and plots traces and profiles against the
+conventional fits. In code:
+```python
+from cer_transfer.inference import load_model, predict_file
+m = load_model("cer_ckpts/nstx_ft.pt")
+r = predict_file(m, "chers_nstx_labeled/chers_137711.joblib")   # relative to CER_DATA_ROOT
+r.pred[chord, frame, k]   # k = 0: T_i (eV), 1: v_tor (km/s); r.pred_sigma, r.y, r.sigma
+```
+In JupyterLab choose the kernel "cer-transfer (pixi)" registered by
+`scripts/setup_env.sh --kernel`; it sets `CER_DATA_ROOT` for the kernel, which a
+portal-launched JupyterLab does not take from your shell profile.
+
+Checkpoints for sharing are exported without optimizer state (about 16 MB):
+`python -m cer_transfer.inference cer_ckpts/nstx_ft.pt nstx_ft_inference.pt`.
 
 ## Workflows
 
@@ -137,8 +169,9 @@ resumed; `--force-resume` overrides that for a deliberate continuation. What has
    the checkpoint after preemption.
 4. GPU: the runs assume an A100 (`--batch-size 256`, `--subseq-len 256`); on a
    smaller card halve the batch size and set `--accumulation-steps 2`.
-4. `pixi install` with `PIXI_CACHE_DIR` on local disk; `pixi run smoke` must report
-   `torch.cuda.is_available() True`; `pixi run test` checks the figure/analysis modules.
+4. `scripts/setup_env.sh --data-root … --pixi-cache …` does the environment,
+   the data-root check and the tests; on a GPU node `pixi run smoke` must report
+   `torch.cuda.is_available() True`.
 
 ## Conventions
 
