@@ -10,6 +10,7 @@ joblib = ">=1.3"
 pandas = ">=2.0"
 tqdm = ">=4.66"
 seaborn = ">=0.13"
+ipykernel = ">=7.4.0,<8"
 
 # torch stack from the PyTorch wheel index with bundled CUDA runtime (no
 # module load / system CUDA needed). torch and torchaudio are resolved
