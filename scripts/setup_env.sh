@@ -9,7 +9,8 @@
 # -> print the two lines to add to your shell profile.
 #
 # Options:
-#   --data-root DIR    directory holding the discharge-file folders (required)
+#   --data-root DIR    directory holding the discharge-file folders (needed for
+#                      training/evaluation; the demo notebook works without it)
 #   --pixi-cache DIR   pixi package cache; use node-local or home disk, not a
 #                      parallel filesystem (default: $HOME/.cache/pixi)
 #   --kernel           register the Jupyter kernel "cer-transfer (pixi)"
@@ -29,10 +30,12 @@ while [ $# -gt 0 ]; do
     *) echo "unknown option: $1"; exit 1 ;;
   esac
 done
-[ -n "$DATA_ROOT" ] || { echo "error: --data-root is required"; exit 1; }
-[ -d "$DATA_ROOT" ] || { echo "error: data root $DATA_ROOT does not exist"; exit 1; }
-DATA_ROOT=$(cd "$DATA_ROOT" && pwd)
-export CER_DATA_ROOT="$DATA_ROOT" PIXI_CACHE_DIR="$PIXI_CACHE"
+if [ -n "$DATA_ROOT" ]; then
+  [ -d "$DATA_ROOT" ] || { echo "error: data root $DATA_ROOT does not exist"; exit 1; }
+  DATA_ROOT=$(cd "$DATA_ROOT" && pwd)
+  export CER_DATA_ROOT="$DATA_ROOT"
+fi
+export PIXI_CACHE_DIR="$PIXI_CACHE"
 
 echo "== 1. pixi"
 if ! command -v pixi >/dev/null 2>&1; then
@@ -46,6 +49,7 @@ echo "== 2. environment"
 pixi install          # re-solves pixi.lock if pixi.toml changed; commit the lock afterwards
 mkdir -p cer_ckpts slurm/logs gallery figs
 
+if [ -n "$DATA_ROOT" ]; then
 echo "== 3. data root: $CER_DATA_ROOT"
 missing=0
 for lst in splits/nstx_val.txt splits/nstx_passive_val.txt splits/d3d_val.txt; do
@@ -55,6 +59,9 @@ for lst in splits/nstx_val.txt splits/nstx_passive_val.txt splits/d3d_val.txt; d
   else echo "  MISSING $lst -> $CER_DATA_ROOT/$first"; missing=1; fi
 done
 [ $missing -eq 0 ] || echo "  some split lists do not resolve under this root (symlink the folders or fix --data-root)"
+else
+echo "== 3. no --data-root given: demo-only setup (training/evaluation need the data root)"
+fi
 
 if [ $TESTS -eq 1 ]; then
   echo "== 4. tests"
@@ -72,13 +79,13 @@ if [ $KERNEL -eq 1 ]; then
   "language": "python",
   "argv": ["$(command -v pixi)", "run", "--manifest-path", "$ROOT/pixi.toml",
            "python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
-  "env": {"CER_DATA_ROOT": "$CER_DATA_ROOT"}
+  "env": {"CER_DATA_ROOT": "${CER_DATA_ROOT:-}"}
 }
 EOF
   echo "  registered $KDIR/kernel.json (visible to any JupyterLab run as this user)"
 fi
 
 echo "== done. Add to your shell profile (~/.bashrc):"
-echo "  export CER_DATA_ROOT=$CER_DATA_ROOT"
+[ -n "$DATA_ROOT" ] && echo "  export CER_DATA_ROOT=$CER_DATA_ROOT"
 echo "  export PIXI_CACHE_DIR=$PIXI_CACHE_DIR"
 echo "Then: sbatch slurm/<job>.sbatch from the repository root; notebooks/demo.ipynb with the kernel 'cer-transfer (pixi)'."

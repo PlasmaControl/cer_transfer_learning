@@ -12,6 +12,20 @@ array, whose lines of sight do not intersect the diagnostic beam. The
 background model also reconstructs profiles while the beam is off, where
 the conventional analysis provides none.
 
+## Getting started
+
+Try the model on a discharge in five minutes (CPU is enough):
+```bash
+git clone https://github.com/PlasmaControl/cer_transfer_learning.git && cd cer_transfer_learning
+scripts/setup_env.sh --kernel          # installs pixi if needed, builds the environment, registers a Jupyter kernel
+pixi run jupyter lab notebooks/demo.ipynb   # or open it in any JupyterLab with the kernel "cer-transfer (pixi)"
+```
+In the notebook's first cell set `RELEASE` to the release URL; it downloads an
+inference checkpoint and one NSTX discharge and plots the reconstruction against
+the conventional fits. Training, evaluation and the figure pipeline additionally
+need the data archive (`CER_DATA_ROOT`) and the split lists: see Installation and
+Running on another cluster.
+
 ## Layout
 
 ```
@@ -191,6 +205,11 @@ resumed; `--force-resume` overrides that for a deliberate continuation. What has
 - Phases without the diagnostic beam are identified from the spectra only:
   the foreground-array line brightness drops to the background level, and
   only switches at which the background brightness stays unchanged count.
+
+## Code style
+
+Formatting follows scikit-learn's conventions: `black` and `isort` at 88 columns
+(`pyproject.toml` holds the settings) and numpydoc docstrings. `pyflakes` is clean.
 
 ## Tests
 

@@ -11,6 +11,7 @@ pandas = ">=2.0"
 tqdm = ">=4.66"
 seaborn = ">=0.13"
 ipykernel = ">=6.29"   # Jupyter kernel for the demo notebook (MyStellar / OnDemand)
+jupyterlab = ">=4"     # `pixi run jupyter lab notebooks/demo.ipynb`
 
 # torch stack from the PyTorch wheel index with bundled CUDA runtime (no
 # module load / system CUDA needed). torch and torchaudio are resolved
