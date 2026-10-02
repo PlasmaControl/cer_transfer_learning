@@ -4,9 +4,11 @@ __pycache__/
 *.pyc
 
 # data, checkpoints and run outputs (large or machine-specific)
+splits/
 cer_ckpts/
 gallery/
 figs/
+demo/
 audit/
 zdf_eval/
 *.npz

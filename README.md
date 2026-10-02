@@ -36,7 +36,7 @@ cer_transfer/        package
 notebooks/demo.ipynb minimal demo: model on one discharge vs conventional fits
 scripts/             shell drivers (figures, beam-off validation)
 slurm/               job files for every training/evaluation run of the study
-splits/              discharge lists defining the train/val/test splits and subsets
+splits/              discharge lists (not in git: generated per data set, see Data format)
 tests/smoke.py       end-to-end check of the non-torch modules on synthetic data
 docs/                notes
 ```
@@ -73,7 +73,14 @@ One joblib file per discharge with
 | `end_index` | int | number of valid frames; ≤ 0 means the whole recording |
 
 File paths in lists and on the command line are resolved against the environment
-variable `CER_DATA_ROOT` unless absolute (`cer_transfer.configs.data_path`).
+variable `CER_DATA_ROOT` unless absolute (`cer_transfer.configs.data_path`). The
+lists themselves (`splits/*.txt`, one path per line, `#` comments allowed) are not
+part of the repository: they are generated from the local data set with
+`python -m cer_transfer.datasets.make_splits` (train/val/test by discharge) and
+`make_d3d_subsets` (nested label-efficiency subsets), and the job files refer to
+them by name (`splits/nstx_train_r325.txt` etc.). The lists used for the paper's
+runs are archived with the data, since the same lists are needed to reproduce the
+reported numbers.
 Machines are defined in `cer_transfer/configs.py`: `d3d` (80 channels),
 `nstx` (51 chords, one array), `nstx_active` / `nstx_passive` (48
 flux-surface-aligned chords of the foreground / background array; the labels
@@ -162,8 +169,8 @@ resumed; `--force-resume` overrides that for a deliberate continuation. What has
    (`chers_nstx_labeled/`, `chers_nstx_active/`, `chers_nstx_passive/`,
    `training_set_30/`, `test_set_30/`, ...). All split lists and the default
    DIII-D directories are relative to it; `sbatch` passes the variable on to
-   the jobs. Do not regenerate the splits for a new machine: that would
-   reshuffle train/val/test and break comparability with earlier runs.
+   the jobs. Copy the archived split lists into `splits/`; only regenerate
+   them for a new data set, since new lists reshuffle train/val/test.
 2. `#SBATCH` headers: add `--partition`/`--account` as required, change
    `--mail-user`. Keep `--signal=B:USR1@300 --requeue`; training resumes from
    the checkpoint after preemption.
