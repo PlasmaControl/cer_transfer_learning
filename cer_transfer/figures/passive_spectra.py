@@ -11,34 +11,36 @@ reconstruction from the passive spectra against the conventional fits
         --chord 2 --target vtor --t0 0.12 --t1 0.45 --t-offset -0.235 \
         --out figs --out-name passive_spectra_141710
 """
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from joblib import load
 
-from cer_transfer.configs import data_path
-
 from cer_transfer.beamstate import beam_state, valid_end
-
+from cer_transfer.configs import data_path
 from cer_transfer.figures.common import FRAME_HZ
 
 FS = FRAME_HZ  # overridden by --fs
 
 
 def spec_of(fp, chord):
+    """Spectrogram (T, W) of one chord from a discharge file."""
     d = load(data_path(fp), mmap_mode="r")
     end = valid_end(d)
     return np.asarray(d["input"][chord, :end, :], dtype=np.float32)
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--fs", type=float, default=FRAME_HZ, help="frame rate (Hz)")
     p.add_argument("--bg", type=Path, required=True, help="passive-model npz")
@@ -49,10 +51,17 @@ def main():
     p.add_argument("--t0", type=float, required=True)
     p.add_argument("--t1", type=float, required=True)
     p.add_argument("--t-offset", type=float, default=0.0)
-    p.add_argument("--px-halfwin", type=int, default=20,
-                   help="wavelength crop: +- pixels around the line peak")
-    p.add_argument("--no-centroid", action="store_true",
-                   help="omit the line-centre trace on the spectrograms")
+    p.add_argument(
+        "--px-halfwin",
+        type=int,
+        default=20,
+        help="wavelength crop: +- pixels around the line peak",
+    )
+    p.add_argument(
+        "--no-centroid",
+        action="store_true",
+        help="omit the line-centre trace on the spectrograms",
+    )
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", type=str, default="passive_spectra")
     args = p.parse_args()
@@ -75,7 +84,7 @@ def main():
     off = np.zeros(T, bool)
     for a, b, cls, ok, _ in st["segments"]:
         if ok:
-            off[a:min(b, T - 1) + 1] = True
+            off[a : min(b, T - 1) + 1] = True
 
     # period without conventional measurement: from the last fit before
     # each verified beam-off phase to the first fit after it; merged
@@ -103,6 +112,7 @@ def main():
     unit = "$v_{tor}$ (km/s)" if k else "$T_i$ (eV)"
 
     def runs(mask):
+        """Contiguous True runs as (first, last)."""
         out, f = [], 0
         while f < len(mask):
             if mask[f]:
@@ -115,6 +125,7 @@ def main():
         return out
 
     def shade(ax, img=False):
+        """Mark the phases without conventional measurement on an axes."""
         for a, b in spans:
             if b < f0 or a > f1:
                 continue
@@ -125,9 +136,15 @@ def main():
                 ax.axvline(x1, color="w", lw=1.0, ls="--")
             else:
                 ax.axvspan(x0, x1, color="0.88", zorder=0, lw=0)
-                ax.text(0.5 * (x0 + x1), 0.97, "no conventional\nmeasurement",
-                        ha="center", va="top", fontsize="x-small",
-                        transform=ax.get_xaxis_transform())
+                ax.text(
+                    0.5 * (x0 + x1),
+                    0.97,
+                    "no conventional\nmeasurement",
+                    ha="center",
+                    va="top",
+                    fontsize="x-small",
+                    transform=ax.get_xaxis_transform(),
+                )
 
     # common colour scale per array: dark-subtracted, window percentiles
     Wn = sf.shape[1]
@@ -135,12 +152,14 @@ def main():
     p0, p1 = max(0, pk - args.px_halfwin), min(Wn, pk + args.px_halfwin + 1)
 
     def prep(s):
+        """Dark-subtracted spectrogram crop and its colour limits."""
         z = s[w] - np.median(s[:40], axis=0, keepdims=True)
         z = z[:, p0:p1]
         lo, hi = np.percentile(z, [1, 99.5])
         return z.T, lo, hi
 
     def centroid(s):
+        """Line-centre pixel per frame, lightly median-smoothed."""
         z = s[w] - np.median(s[:40], axis=0, keepdims=True)
         q0, q1 = max(0, pk - 8), min(Wn, pk + 9)
         v = np.clip(z[:, q0:q1], 0, None)
@@ -151,7 +170,7 @@ def main():
         # light 3-frame median smoothing
         cs = cen.copy()
         for i in range(1, len(cen) - 1):
-            cs[i] = np.nanmedian(cen[i - 1:i + 2])
+            cs[i] = np.nanmedian(cen[i - 1 : i + 2])
         return cs
 
     zf, lof, hif = prep(sf)
@@ -162,17 +181,29 @@ def main():
     for ctx, extn in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             size = (5.2, 6.2) if ctx == "paper" else (9, 10)
-            fig, axes = plt.subplots(3, 1, figsize=size, sharex=True,
-                                     gridspec_kw={"height_ratios": [1, 1, 1.2]})
+            fig, axes = plt.subplots(
+                3,
+                1,
+                figsize=size,
+                sharex=True,
+                gridspec_kw={"height_ratios": [1, 1, 1.2]},
+            )
             for ax, z, lo, hi, lab, cc in (
-                    (axes[0], zf, lof, hif, "foreground array\n(views the beam)", cf),
-                    (axes[1], zb, lob, hib, "background array\n(passive light)", cb)):
-                ax.imshow(z, aspect="auto", origin="lower", extent=ext,
-                          vmin=lo, vmax=hi, cmap="magma",
-                          interpolation="nearest")
+                (axes[0], zf, lof, hif, "foreground array\n(views the beam)", cf),
+                (axes[1], zb, lob, hib, "background array\n(passive light)", cb),
+            ):
+                ax.imshow(
+                    z,
+                    aspect="auto",
+                    origin="lower",
+                    extent=ext,
+                    vmin=lo,
+                    vmax=hi,
+                    cmap="magma",
+                    interpolation="nearest",
+                )
                 if not args.no_centroid:
-                    ax.plot(t[w], cc, "-", color="c", lw=1.1,
-                            label="line centre")
+                    ax.plot(t[w], cc, "-", color="c", lw=1.1, label="line centre")
                 ax.set_ylim(p0, p1)
                 shade(ax, img=True)
                 ax.set_ylabel(f"{lab}\nwavelength (px)", fontsize="small")
@@ -180,25 +211,40 @@ def main():
             ax = axes[2]
             shade(ax)
             m_, s_ = pred[c, w, k], psig[c, w, k]
-            ax.fill_between(t[w], m_ - s_, m_ + s_, color="C0", alpha=0.22,
-                            lw=0)
-            ax.plot(t[w], m_, "-", color="C0", lw=1.6,
-                    label="reconstruction from passive spectra")
+            ax.fill_between(t[w], m_ - s_, m_ + s_, color="C0", alpha=0.22, lw=0)
+            ax.plot(
+                t[w],
+                m_,
+                "-",
+                color="C0",
+                lw=1.6,
+                label="reconstruction from passive spectra",
+            )
             yv = y[c, w, k]
             mm = np.isfinite(yv)
-            ax.plot(t[w][mm], yv[mm], "o", color="k", ms=3.5, zorder=5,
-                    label="conventional fit")
+            ax.plot(
+                t[w][mm],
+                yv[mm],
+                "o",
+                color="k",
+                ms=3.5,
+                zorder=5,
+                label="conventional fit",
+            )
             ax.set_ylabel(unit)
             ax.set_xlabel("time (s)")
             ax.legend(fontsize="x-small", loc="best")
             axes[0].set_title(f"chord {c}", fontsize="medium")
             fig.tight_layout()
-            fig.savefig(args.out / f"{args.out_name}.{extn}", dpi=300,
-                        bbox_inches="tight")
+            fig.savefig(
+                args.out / f"{args.out_name}.{extn}", dpi=300, bbox_inches="tight"
+            )
             plt.close(fig)
-    print(f"wrote {args.out}/{args.out_name}.png/.pdf | chord {c} | "
-          f"periods without conventional measurement: "
-          + ", ".join(f"{t[a]:.3f}-{t[b]:.3f} s" for a, b in spans))
+    print(
+        f"wrote {args.out}/{args.out_name}.png/.pdf | chord {c} | "
+        f"periods without conventional measurement: "
+        + ", ".join(f"{t[a]:.3f}-{t[b]:.3f} s" for a, b in spans)
+    )
 
 
 if __name__ == "__main__":

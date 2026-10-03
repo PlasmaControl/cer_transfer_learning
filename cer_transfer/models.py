@@ -165,6 +165,14 @@ class Backbone(nn.Module):
                     nn.Dropout(cfg.dropout),
                 )
                 self.chord_merge = nn.Conv2d(sw, widths[1], 1, bias=cfg.bias)
+                self.chord_dim = sw * cfg.hidden_dim
+                if cfg.chord_attention:
+                    self.chord_attn = nn.MultiheadAttention(
+                        self.chord_dim, cfg.chord_attention_heads, batch_first=True
+                    )
+                    self.chord_norm = nn.LayerNorm(self.chord_dim)
+                else:
+                    self.chord_attn = None
             else:
                 self.stem = nn.Sequential(
                     *block(widths[0], widths[1], w_pool=stem_w_pools)
@@ -224,9 +232,17 @@ class Backbone(nn.Module):
         per_chord = per_chord.reshape(b, c, f0, t, w1)
         merged = self.chord_merge(per_chord.mean(dim=1))
         shared = self.refine(self.pool(self.trunk(merged)))
-        chord_feats = self.pool(per_chord.reshape(b * c, f0, t, w1))
-        chord_feats = chord_feats.reshape(b, c, f0, t, self.hidden_dim)
-        return shared, chord_feats
+        # per-chord tokens: (B, C, T, F0 * hidden)
+        tok = self.pool(per_chord.reshape(b * c, f0, t, w1))
+        tok = tok.reshape(b, c, f0, t, self.hidden_dim).permute(0, 1, 3, 2, 4)
+        tok = tok.reshape(b, c, t, f0 * self.hidden_dim)
+        if self.chord_attn is not None:
+            # every chord attends over all chords of the same frame
+            q = tok.permute(0, 2, 1, 3).reshape(b * t, c, -1)  # (B*T, C, D)
+            att, _ = self.chord_attn(q, q, q, need_weights=False)
+            q = self.chord_norm(q + att)
+            tok = q.reshape(b, t, c, -1).permute(0, 2, 1, 3)
+        return shared, tok
 
     def param_groups(self):
         """(early, late) parameter lists for discriminative fine-tuning.
@@ -340,9 +356,7 @@ class SharedTrunkHead(nn.Module):
             if chord_feats is None:
                 raise RuntimeError("agnostic head needs per-chord stem features")
             c = chord_feats.shape[1]
-            g = self.chord_proj(
-                chord_feats.permute(0, 1, 3, 2, 4).reshape(b, c, t, -1)
-            )  # (B, C, T, H)
+            g = self.chord_proj(chord_feats)  # (B, C, T, H)
             z = torch.cat([h.unsqueeze(1).expand(-1, c, -1, -1), g], dim=-1)
             if self.use_moments:
                 z = torch.cat([z, moments], dim=-1)

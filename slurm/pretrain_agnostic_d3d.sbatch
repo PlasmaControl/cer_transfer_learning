@@ -34,7 +34,7 @@ trap 'echo "USR1: requeue"; scontrol requeue $SLURM_JOB_ID' USR1
 
 srun $RUN python -u train.py $RESUME \
     --machine d3d_tangential --checkpoint "$OUT" \
-    --agnostic --resample-w 256 \
+    --agnostic --chord-attention --resample-w 256 \
     --feature-width 128 --hidden-dim 8 --kernel-size 3 --head-type mlp --norm group \
     --batch-size 8 --accumulation-steps 32 --subseq-len 256 \
     --num-workers 8 --no-mmap &

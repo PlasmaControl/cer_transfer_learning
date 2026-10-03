@@ -77,7 +77,7 @@ if [ $KERNEL -eq 1 ]; then
 {
   "display_name": "cer-transfer (pixi)",
   "language": "python",
-  "argv": ["$(command -v pixi)", "run", "--manifest-path", "$ROOT/pixi.toml",
+  "argv": ["$(command -v pixi)", "run", "--frozen", "--manifest-path", "$ROOT/pixi.toml",
            "python", "-m", "ipykernel_launcher", "-f", "{connection_file}"],
   "env": {"CER_DATA_ROOT": "${CER_DATA_ROOT:-}"}
 }
@@ -85,7 +85,14 @@ EOF
   echo "  registered $KDIR/kernel.json (visible to any JupyterLab run as this user)"
 fi
 
-echo "== done. Add to your shell profile (~/.bashrc):"
+# repo-local environment file sourced by every job (git-ignored)
+{
+  [ -n "$DATA_ROOT" ] && echo "export CER_DATA_ROOT=$CER_DATA_ROOT"
+  echo "export PIXI_CACHE_DIR=$PIXI_CACHE_DIR"
+} > .env
+echo "== wrote .env (sourced by the job files)"
+
+echo "== done. Add to your shell profile (~/.bashrc), or 'source .env':"
 [ -n "$DATA_ROOT" ] && echo "  export CER_DATA_ROOT=$CER_DATA_ROOT"
 echo "  export PIXI_CACHE_DIR=$PIXI_CACHE_DIR"
 echo "Then: sbatch slurm/<job>.sbatch from the repository root; notebooks/demo.ipynb with the kernel 'cer-transfer (pixi)'."

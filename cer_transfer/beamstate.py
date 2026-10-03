@@ -11,6 +11,7 @@ step). Transitions where both arrays jump together are
 plasma events; transitions where only the background array jumps are
 not beam-related. Both are rejected.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -34,7 +35,7 @@ def _brightness(fp):
     end = valid_end(d)
     tot = np.asarray(d["input"][:, :end, :], np.float32).sum(axis=(0, 2))
     pre = min(PRE, end - 1)
-    dw = tot[:max(8, pre - 2)]
+    dw = tot[: max(8, pre - 2)]
     dk = np.median(dw)
     nz = 1.4826 * np.median(np.abs(dw - dk))
     lab = np.isfinite(np.asarray(d["target"][:, :end, 0])).any(axis=0)
@@ -54,19 +55,52 @@ def _runs(mask):
     return out
 
 
-def beam_state(bg_file, fg_file, step_fg=2.0, step_bg=4.0, dominance=3.0,
-               min_len=2):
-    """Returns dict with T, active, lab, off_raw, off (verified), thr,
-    R_on, R_low, and segments [(a, b, cls, verified, why)]."""
+def beam_state(bg_file, fg_file, step_fg=2.0, step_bg=4.0, dominance=3.0, min_len=2):
+    """Detect phases in which the diagnostic beam is off, from both arrays.
+
+    The ratio of foreground to background line brightness drops when the beam
+    switches off. A candidate phase counts as verified only if it is bounded by
+    clean beam switches: the foreground brightness steps by more than
+    ``step_fg`` times its typical frame-to-frame change, the background
+    brightness changes by less than ``step_bg`` times its typical change, and
+    the foreground step exceeds ``dominance`` times the background step.
+    Plasma events (both arrays step together) are thereby rejected.
+
+    Parameters
+    ----------
+    bg_file, fg_file : Path
+        Background- and foreground-array joblib files of the same discharge.
+    step_fg, step_bg, dominance : float
+        Switch criteria, see above.
+    min_len : int, default=2
+        Minimum phase length in frames.
+
+    Returns
+    -------
+    dict
+        ``T`` (frames), ``active`` (plasma present), ``lab`` (frames with
+        fits), ``off_raw`` (ratio below threshold), ``off`` (verified),
+        ``thr``, ``R_on``, ``R_low``, and ``segments``: list of
+        ``(first, last, cls, verified, why)`` with ``cls`` in
+        ``{'head', 'notch', 'tail'}``.
+    """
     bb, nzb, lab = _brightness(bg_file)
     bf, _, _ = _brightness(fg_file)
     T = min(len(bb), len(bf))
     bb, bf, lab = bb[:T], bf[:T], lab[:T]
     active = bb > 8 * nzb
-    active[:min(PRE, T)] = False
-    out = dict(T=T, active=active, lab=lab, thr=np.nan, R_on=np.nan,
-               R_low=np.nan, off_raw=np.zeros(T, bool),
-               off=np.zeros(T, bool), segments=[])
+    active[: min(PRE, T)] = False
+    out = dict(
+        T=T,
+        active=active,
+        lab=lab,
+        thr=np.nan,
+        R_on=np.nan,
+        R_low=np.nan,
+        off_raw=np.zeros(T, bool),
+        off=np.zeros(T, bool),
+        segments=[],
+    )
     if not (active & lab).any():
         return out
     with np.errstate(all="ignore"):
@@ -89,7 +123,8 @@ def beam_state(bg_file, fg_file, step_fg=2.0, step_bg=4.0, dominance=3.0,
     tb = np.median(np.abs(np.diff(lb))[same]) if same.any() else np.nan
     tf = np.median(np.abs(np.diff(lf))[same]) if same.any() else np.nan
 
-    def clean(i):  # transition between frames i and i+1
+    def clean(i):
+        """Is the transition between frames i and i+1 a clean beam switch?"""
         if not (0 <= i < T - 1 and active[i] and active[i + 1]):
             return None
         sf = abs(lf[i + 1] - lf[i])
@@ -97,8 +132,7 @@ def beam_state(bg_file, fg_file, step_fg=2.0, step_bg=4.0, dominance=3.0,
         # background: below step_bg x its median step (4x: ~0.7% false
         # rejection from noise alone; 2x rejected ~18% per boundary);
         # foreground: a real step that dominates the background change
-        return bool(sf > step_fg * tf and sb < step_bg * tb
-                    and sf > dominance * sb)
+        return bool(sf > step_fg * tf and sb < step_bg * tb and sf > dominance * sb)
 
     # non-circular test of "the background array does not see the beam":
     # over ALL transitions at which the foreground brightness steps
@@ -119,11 +153,13 @@ def beam_state(bg_file, fg_file, step_fg=2.0, step_bg=4.0, dominance=3.0,
         edges = [clean(a - 1), clean(b)]
         known = [e for e in edges if e is not None]
         ok = bool(known) and all(known)
-        why = ("clean beam switch" if ok else
-               "no bounding transition" if not known else
-               "not a beam switch")
+        why = (
+            "clean beam switch"
+            if ok
+            else "no bounding transition" if not known else "not a beam switch"
+        )
         out["segments"].append((a, b, cls, ok, why))
         if ok:
-            off[a:b + 1] = True
+            off[a : b + 1] = True
     out["off"] = off
     return out

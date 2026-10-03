@@ -9,14 +9,19 @@ confidence check. A frame is DARK only if:
      frames (photon-noise anchor, robust to bright transients).
 Shots without any label yield NO dark frames (no anchor -> no claim).
 """
+
 from __future__ import annotations
 
 import numpy as np
 
 
-def dark_mask(spec: np.ndarray, target: np.ndarray,
-              guard: int = 60, k: float = 3.0,
-              pre_only: bool = True) -> np.ndarray:
+def dark_mask(
+    spec: np.ndarray,
+    target: np.ndarray,
+    guard: int = 60,
+    k: float = 3.0,
+    pre_only: bool = True,
+) -> np.ndarray:
     """spec (C, T, W) raw counts; target (C, T, n_t) with NaN where
     unlabeled. Returns (T,) bool.
 
@@ -44,7 +49,7 @@ def dark_mask(spec: np.ndarray, target: np.ndarray,
     outside = np.zeros(T, bool)
     outside[:lo] = True
     if not pre_only:
-        outside[hi + 1:] = True
+        outside[hi + 1 :] = True
 
     base = np.median(spec, axis=2, keepdims=True)
     amp_t = np.clip(spec - base, 0, None).mean(axis=(0, 2))

@@ -8,6 +8,7 @@ by fitted frames (enables re-entry validation).
     pixi run python -u -m cer_transfer.beamoff.scan --list splits/nstx_passive_val.txt \
         [--min-gap 20] [--top 25] [--limit N]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -16,23 +17,31 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
-from cer_transfer.configs import data_path
 from cer_transfer.beamstate import valid_end
+from cer_transfer.configs import data_path
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--list", type=Path, required=True)
-    p.add_argument("--min-gap", type=int, default=20,
-                   help="minimum gap length in frames (20 = 100 ms)")
+    p.add_argument(
+        "--min-gap",
+        type=int,
+        default=20,
+        help="minimum gap length in frames (20 = 100 ms)",
+    )
     p.add_argument("--top", type=int, default=25)
     p.add_argument("--limit", type=int, default=0)
     args = p.parse_args()
 
-    files = [ln.strip() for ln in args.list.read_text().splitlines()
-             if ln.strip() and not ln.strip().startswith("#")]
+    files = [
+        ln.strip()
+        for ln in args.list.read_text().splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
     if args.limit:
-        files = files[:args.limit]
+        files = files[: args.limit]
 
     rows = []
     for fp in files:
@@ -50,7 +59,7 @@ def main():
         # clock zero: those frames are pre-plasma by construction and
         # provide the dark reference; plasma cannot be active there
         PRE = min(47, end - 1)
-        dw = tot[:max(8, PRE - 2)]
+        dw = tot[: max(8, PRE - 2)]
         dark = np.median(dw)
         noise = 1.4826 * np.median(np.abs(dw - dark))
         active = tot > dark + 8 * max(noise, 1e-6 * abs(dark) + 1e-6)
@@ -83,19 +92,31 @@ def main():
             f += 1
         if best or tail >= args.min_gap or head >= args.min_gap:
             shot = Path(fp).stem
-            rows.append((best[0] if best else 0, head, tail, shot,
-                         best[1] if best else -1, best[2] if best else -1,
-                         int(lab.sum())))
+            rows.append(
+                (
+                    best[0] if best else 0,
+                    head,
+                    tail,
+                    shot,
+                    best[1] if best else -1,
+                    best[2] if best else -1,
+                    int(lab.sum()),
+                )
+            )
     rows.sort(reverse=True)
-    print(f"{'gap':>5} {'head':>5} {'tail':>5} {'shot':>28} "
-          f"{'gap frames':>16} {'#fits':>6}   (gap: bracketed; head: "
-          "pre-beam startup; tail: post-beam)")
-    for g, h, t, s, a, b, n in rows[:args.top]:
+    print(
+        f"{'gap':>5} {'head':>5} {'tail':>5} {'shot':>28} "
+        f"{'gap frames':>16} {'#fits':>6}   (gap: bracketed; head: "
+        "pre-beam startup; tail: post-beam)"
+    )
+    for g, h, t, s, a, b, n in rows[: args.top]:
         w = f"[{a}..{b}]" if a >= 0 else "-"
         print(f"{g:5d} {h:5d} {t:5d} {s:>28} {w:>16} {n:6d}")
-    print(f"\n{len(rows)} shots with candidate windows "
-          f">= {args.min_gap} frames ({args.min_gap*5} ms). Confirm the "
-          "top candidates against the NB power trace before use.")
+    print(
+        f"\n{len(rows)} shots with candidate windows "
+        f">= {args.min_gap} frames ({args.min_gap*5} ms). Confirm the "
+        "top candidates against the NB power trace before use."
+    )
 
 
 if __name__ == "__main__":

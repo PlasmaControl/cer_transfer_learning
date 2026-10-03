@@ -8,11 +8,13 @@ mid-discharge beam-off phases in the scanner CSVs (startup excluded).
         --verified gallery/beamoff_verified.csv gallery/beamoff_verified_test.csv \
         --n 4 --chord 2 --target vtor --out figs --out-name beamoff_grid
 """
+
 import argparse
 import csv
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -26,7 +28,7 @@ from cer_transfer.figures.common import FRAME_HZ
 FS = FRAME_HZ  # overridden by --fs
 
 
-GALLERY = Path("gallery")   # overridden by --gallery
+GALLERY = Path("gallery")  # overridden by --gallery
 
 
 def files_for(shot):
@@ -35,29 +37,53 @@ def files_for(shot):
     for p in ("bo", "bt"):
         npz = GALLERY / f"{p}_{shot}_bg.npz"
         if npz.exists():
-            return (npz, (GALLERY / f"{p}_{shot}_bg.txt").read_text().strip(),
-                    (GALLERY / f"{p}_{shot}_fg.txt").read_text().strip())
+            return (
+                npz,
+                (GALLERY / f"{p}_{shot}_bg.txt").read_text().strip(),
+                (GALLERY / f"{p}_{shot}_fg.txt").read_text().strip(),
+            )
     return None
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--fs", type=float, default=FRAME_HZ, help="frame rate (Hz)")
-    p.add_argument("--gallery", type=Path, default=Path("gallery"),
-                   help="folder with the per-shot prediction dumps and file lists")
+    p.add_argument(
+        "--gallery",
+        type=Path,
+        default=Path("gallery"),
+        help="folder with the per-shot prediction dumps and file lists",
+    )
     p.add_argument("--verified", nargs="+", required=True)
     p.add_argument("--n", type=int, default=4)
-    p.add_argument("--pick", choices=("longest", "median"), default="longest",
-                   help="longest: longest verified notches; median: discharges "
-                        "whose beam-off/beam-on ratio (edge test) is closest "
-                        "to the median of all discharges -- representative cases")
-    p.add_argument("--edge-csv", nargs="*", default=[],
-                   help="cer_transfer.beamoff.edge_frame_test CSVs (needed for --pick median)")
-    p.add_argument("--min-notch-ms", type=float, default=0.0,
-                   help="only discharges whose longest verified notch is at "
-                        "least this long (ms)")
-    p.add_argument("--shots", type=str, default=None,
-                   help="override the selection: comma-separated shots")
+    p.add_argument(
+        "--pick",
+        choices=("longest", "median"),
+        default="longest",
+        help="longest: longest verified notches; median: discharges "
+        "whose beam-off/beam-on ratio (edge test) is closest "
+        "to the median of all discharges -- representative cases",
+    )
+    p.add_argument(
+        "--edge-csv",
+        nargs="*",
+        default=[],
+        help="cer_transfer.beamoff.edge_frame_test CSVs (needed for --pick median)",
+    )
+    p.add_argument(
+        "--min-notch-ms",
+        type=float,
+        default=0.0,
+        help="only discharges whose longest verified notch is at "
+        "least this long (ms)",
+    )
+    p.add_argument(
+        "--shots",
+        type=str,
+        default=None,
+        help="override the selection: comma-separated shots",
+    )
     p.add_argument("--chord", type=int, default=2)
     p.add_argument("--target", choices=("ti", "vtor"), default="vtor")
     p.add_argument("--t-offset", type=float, default=-0.235)
@@ -93,18 +119,32 @@ def main():
         if not ratio:
             raise SystemExit("--pick median needs --edge-csv")
         med = float(np.median(list(ratio.values())))
-        cand = [s for s in ratio if s in best and files_for(s) is not None
-                and best[s][0] * 5 >= args.min_notch_ms]
-        chosen = sorted(cand, key=lambda s: abs(np.log(ratio[s] / med)))[:args.n]
-        how = (f"closest to the median ratio {med:.2f} of {len(ratio)} discharges"
-               + (f", notch >= {args.min_notch_ms:g} ms" if args.min_notch_ms else ""))
+        cand = [
+            s
+            for s in ratio
+            if s in best
+            and files_for(s) is not None
+            and best[s][0] * 5 >= args.min_notch_ms
+        ]
+        chosen = sorted(cand, key=lambda s: abs(np.log(ratio[s] / med)))[: args.n]
+        how = f"closest to the median ratio {med:.2f} of {len(ratio)} discharges" + (
+            f", notch >= {args.min_notch_ms:g} ms" if args.min_notch_ms else ""
+        )
     else:
-        chosen = [s for s, _ in sorted(best.items(), key=lambda kv: -kv[1][0])
-                  if files_for(s) is not None][:args.n]
+        chosen = [
+            s
+            for s, _ in sorted(best.items(), key=lambda kv: -kv[1][0])
+            if files_for(s) is not None
+        ][: args.n]
         how = "longest verified notch"
-    print(f"selected ({how}): " + ", ".join(
-        f"{s} ({best.get(s, (0,))[0] * 5} ms"
-        + (f", ratio {ratio[s]:.2f})" if s in ratio else ")") for s in chosen))
+    print(
+        f"selected ({how}): "
+        + ", ".join(
+            f"{s} ({best.get(s, (0,))[0] * 5} ms"
+            + (f", ratio {ratio[s]:.2f})" if s in ratio else ")")
+            for s in chosen
+        )
+    )
 
     k = 1 if args.target == "vtor" else 0
     unit = "$v_{tor}$ (km/s)" if k else "$T_i$ (eV)"
@@ -153,23 +193,39 @@ def main():
                 m = int(round(args.margin * FS))
                 f0, f1 = max(a - m, 0), min(b + m, T - 1)
                 w = np.arange(f0, f1 + 1)
-                ax.axvspan(t[a] - 0.5 / FS, t[b] + 0.5 / FS, color="0.88",
-                           zorder=0, lw=0)
-                ax.fill_between(t[w], pr[w] - ps[w], pr[w] + ps[w], color="C0",
-                                alpha=0.22, lw=0)
-                ax.plot(t[w], pr[w], "-", color="C0", lw=1.5,
-                        label="reconstruction from passive spectra")
+                ax.axvspan(
+                    t[a] - 0.5 / FS, t[b] + 0.5 / FS, color="0.88", zorder=0, lw=0
+                )
+                ax.fill_between(
+                    t[w], pr[w] - ps[w], pr[w] + ps[w], color="C0", alpha=0.22, lw=0
+                )
+                ax.plot(
+                    t[w],
+                    pr[w],
+                    "-",
+                    color="C0",
+                    lw=1.5,
+                    label="reconstruction from passive spectra",
+                )
                 mm = np.isfinite(y[w])
-                ax.plot(t[w][mm], y[w][mm], "o", color="k", ms=3, zorder=5,
-                        label="conventional fit")
+                ax.plot(
+                    t[w][mm],
+                    y[w][mm],
+                    "o",
+                    color="k",
+                    ms=3,
+                    zorder=5,
+                    label="conventional fit",
+                )
                 ax.set_xlim(t[f0], t[f1])
                 ax.set_title(f"discharge {s}", fontsize="small")
                 ax.set_xlabel("time (s)")
                 ax.set_ylabel(f"chord {args.chord}\n{unit}", fontsize="small")
             axes.ravel()[0].legend(fontsize="xx-small", loc="best")
             fig.tight_layout()
-            fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300,
-                        bbox_inches="tight")
+            fig.savefig(
+                args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches="tight"
+            )
             plt.close(fig)
     print(f"wrote {args.out}/{args.out_name}.png/.pdf")
 

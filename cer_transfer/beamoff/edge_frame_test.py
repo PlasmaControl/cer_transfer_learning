@@ -21,6 +21,7 @@ conditions (same distance to the reference fit, same shots).
         --fg-file "$(cat gallery/bo_115520_fg.txt)" \\
         [--csv gallery/edge_pool.csv]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,28 +34,47 @@ from cer_transfer.beamstate import beam_state
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--shot", type=str, required=True)
     p.add_argument("--bg", type=Path, required=True)
     p.add_argument("--bg-file", type=Path, required=True)
     p.add_argument("--fg-file", type=Path, required=True)
-    p.add_argument("--guard", type=int, default=1,
-                   help="skip this many frames next to the switch (frames "
-                        "in which the beam changes mid-exposure)")
-    p.add_argument("--max-gap", type=int, default=3,
-                   help="max frames between the switch and the reference fit")
+    p.add_argument(
+        "--guard",
+        type=int,
+        default=1,
+        help="skip this many frames next to the switch (frames "
+        "in which the beam changes mid-exposure)",
+    )
+    p.add_argument(
+        "--max-gap",
+        type=int,
+        default=3,
+        help="max frames between the switch and the reference fit",
+    )
     p.add_argument("--csv", type=Path, default=None)
     p.add_argument("--t-offset", type=float, default=-0.235)
-    p.add_argument("--exclude-head", action="store_true",
-                   help="drop pairs at the exit of the startup phase (before "
-                        "the first beam injection)")
-    p.add_argument("--min-after-first-fit", type=float, default=0.0,
-                   help="ignore test frames earlier than the first fit + this "
-                        "(s), for beam-off AND beam-on frames (startup transient, "
-                        "unreliable first fits)")
-    p.add_argument("--verbose", action="store_true",
-                   help="print every edge pair: phase, side, times, and the "
-                        "median difference over chords")
+    p.add_argument(
+        "--exclude-head",
+        action="store_true",
+        help="drop pairs at the exit of the startup phase (before "
+        "the first beam injection)",
+    )
+    p.add_argument(
+        "--min-after-first-fit",
+        type=float,
+        default=0.0,
+        help="ignore test frames earlier than the first fit + this "
+        "(s), for beam-off AND beam-on frames (startup transient, "
+        "unreliable first fits)",
+    )
+    p.add_argument(
+        "--verbose",
+        action="store_true",
+        help="print every edge pair: phase, side, times, and the "
+        "median difference over chords",
+    )
     args = p.parse_args()
 
     d = np.load(args.bg)
@@ -69,16 +89,20 @@ def main():
     active = st["active"][:T]
     fitted = np.isfinite(y[..., 0]).any(axis=0)
     off = np.zeros(T, bool)
-    segs = [(a, min(b, T - 1), cls) for a, b, cls, ok, _ in st["segments"]
-            if ok and a < T]
+    segs = [
+        (a, min(b, T - 1), cls) for a, b, cls, ok, _ in st["segments"] if ok and a < T
+    ]
     for a, b, _ in segs:
-        off[a:b + 1] = True
+        off[a : b + 1] = True
     on = active & ~off
     g, mg = args.guard, args.max_gap
 
     fit_idx = np.where(fitted)[0]
-    t_min = (int(fit_idx.min()) + int(round(args.min_after_first_fit * 200))
-             if fit_idx.size else 0)
+    t_min = (
+        int(fit_idx.min()) + int(round(args.min_after_first_fit * 200))
+        if fit_idx.size
+        else 0
+    )
     on = on & (np.arange(T) >= t_min)
     pairs = []  # (test frame, reference fit frame, class, side)
     for a, b, cls in segs:
@@ -86,14 +110,14 @@ def main():
             continue
         ft = a + g
         if ft <= b:
-            refs = [f for f in range(a - 1, max(a - 1 - mg, -1), -1)
-                    if fitted[f] and on[f]]
+            refs = [
+                f for f in range(a - 1, max(a - 1 - mg, -1), -1) if fitted[f] and on[f]
+            ]
             if refs:
                 pairs.append((ft, refs[0], cls, "entry"))
         ft = b - g
         if ft >= a:
-            refs = [f for f in range(b + 1, min(b + 1 + mg, T))
-                    if fitted[f] and on[f]]
+            refs = [f for f in range(b + 1, min(b + 1 + mg, T)) if fitted[f] and on[f]]
             if refs:
                 pairs.append((ft, refs[0], cls, "exit"))
 
@@ -106,11 +130,15 @@ def main():
             dv = np.median(np.abs(pred[m, ft, 1] - y[m, fr, 1])) if m.any() else np.nan
             fit_v = np.median(y[m, fr, 1]) if m.any() else np.nan
             rec_v = np.median(pred[m, ft, 1]) if m.any() else np.nan
-            print(f"  pair {cls:5s} {side:5s}: test frame t={ft / 200 + to:.3f} s, "
-                  f"nearest fit t={fr / 200 + to:.3f} s | vtor median: "
-                  f"reconstruction {rec_v:.3g}, fit {fit_v:.3g}, |diff| {dv:.3g} km/s")
-    print(f"shot {args.shot}: {len(segs)} verified beam-off phases, "
-          f"{len(pairs)} edge pairs (guard {g}, max gap {mg} frames)")
+            print(
+                f"  pair {cls:5s} {side:5s}: test frame t={ft / 200 + to:.3f} s, "
+                f"nearest fit t={fr / 200 + to:.3f} s | vtor median: "
+                f"reconstruction {rec_v:.3g}, fit {fit_v:.3g}, |diff| {dv:.3g} km/s"
+            )
+    print(
+        f"shot {args.shot}: {len(segs)} verified beam-off phases, "
+        f"{len(pairs)} edge pairs (guard {g}, max gap {mg} frames)"
+    )
     row = {"shot": args.shot, "n_pairs": len(pairs)}
     if not pairs:
         print("  no usable edge pairs")
@@ -130,8 +158,7 @@ def main():
             for f in np.where(on)[0]:
                 for fr in (f - dd, f + dd):
                     if 0 <= fr < T and on[fr] and fitted[fr] and dd > 0:
-                        m = (np.isfinite(y[:, fr, t])
-                             & np.isfinite(pred[:, f, t]))
+                        m = np.isfinite(y[:, fr, t]) & np.isfinite(pred[:, f, t])
                         e_on.append(np.abs(pred[m, f, t] - y[m, fr, t]))
             # change of the fits themselves: fitted pairs at the nearest
             # realizable distance (fit cadence may forbid odd distances)
@@ -141,8 +168,7 @@ def main():
                     for f in np.where(on & fitted)[0]:
                         fr = f + d2
                         if fr < T and on[fr] and fitted[fr]:
-                            m2 = (np.isfinite(y[:, fr, t])
-                                  & np.isfinite(y[:, f, t]))
+                            m2 = np.isfinite(y[:, fr, t]) & np.isfinite(y[:, f, t])
                             r_ref.append(np.abs(y[m2, fr, t] - y[m2, f, t]))
                             got = True
                     if got:
@@ -155,29 +181,43 @@ def main():
             continue
         mo, mn = np.median(e_off), np.median(e_on)
         mr = np.median(r_ref) if r_ref.size else np.nan
-        print(f"  {tn} ({u}): beam-off test frames vs adjacent fit "
-              f"{mo:.3g} | same test with beam-on frames {mn:.3g} "
-              f"(ratio off/on {mo / mn:.2f}) | change of the fits "
-              f"themselves over the same distance {mr:.3g}")
-        row.update({f"{tn}_off": mo, f"{tn}_on": mn, f"{tn}_ratio": mo / mn,
-                    f"{tn}_fitchange": mr})
+        print(
+            f"  {tn} ({u}): beam-off test frames vs adjacent fit "
+            f"{mo:.3g} | same test with beam-on frames {mn:.3g} "
+            f"(ratio off/on {mo / mn:.2f}) | change of the fits "
+            f"themselves over the same distance {mr:.3g}"
+        )
+        row.update(
+            {
+                f"{tn}_off": mo,
+                f"{tn}_on": mn,
+                f"{tn}_ratio": mo / mn,
+                f"{tn}_fitchange": mr,
+            }
+        )
     by_cls = {}
     for _, _, cls, _ in pairs:
         by_cls[cls] = by_cls.get(cls, 0) + 1
     if by_cls:
-        print("  pairs by phase: " + ", ".join(
-            f"{k} {v}" for k, v in sorted(by_cls.items())))
+        print(
+            "  pairs by phase: "
+            + ", ".join(f"{k} {v}" for k, v in sorted(by_cls.items()))
+        )
     if args.csv is not None:
-        fields = ["shot", "n_pairs"] + [f"{tn}_{k}" for tn, _ in names
-                                        for k in ("off", "on", "ratio",
-                                                  "fitchange")]
+        fields = ["shot", "n_pairs"] + [
+            f"{tn}_{k}" for tn, _ in names for k in ("off", "on", "ratio", "fitchange")
+        ]
         new = not args.csv.exists()
         with open(args.csv, "a", newline="") as fh:
             w = csv.DictWriter(fh, fieldnames=fields, restval="")
             if new:
                 w.writeheader()
-            w.writerow({k: (f"{float(v):.4g}" if isinstance(
-                v, (float, np.floating)) else v) for k, v in row.items()})
+            w.writerow(
+                {
+                    k: (f"{float(v):.4g}" if isinstance(v, (float, np.floating)) else v)
+                    for k, v in row.items()
+                }
+            )
 
 
 if __name__ == "__main__":

@@ -190,6 +190,11 @@ class ModelConfig:
     # with the number of chords); it is projected to encoder_widths[0] after
     # averaging over chords
     agnostic_stem_width: int = 32
+    # agnostic mode: let each chord attend over all chords (per frame) before
+    # the readout, instead of relying on its own stem features alone; set
+    # based, permutation-invariant, no positional information
+    chord_attention: bool = False
+    chord_attention_heads: int = 4
     # Resample the wavelength axis to this many bins in preprocessing (plain
     # interpolation), so spectrometers with different resolution share a
     # pixel scale. None keeps the native axis.

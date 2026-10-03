@@ -5,8 +5,9 @@ label-noise floor for the MEDIAN ABSOLUTE ERROR of an ideal model:
 
 0.674 = median |N(0,1)| (an ideal model's median |error| under Gaussian
 label noise of scale s is 0.674 s, not s); k_d = per-line-amplitude-decile
-self-consistency factor of the quoted sigma (as cer_transfer.analysis.ceiling_check --honest:
-median adjacent-frame z per decile / lowest decile, clipped at 1).
+self-consistency factor of the quoted sigma (as
+cer_transfer.analysis.ceiling_check --honest: median adjacent-frame z per
+decile / lowest decile, clipped at 1).
 Supersedes cer_transfer.figures.transfer_floor (kept unchanged; it draws median sigma).
 
 Inputs: per-point dumps from eval_checkpoint.py --dump-preds (patched, with
@@ -20,8 +21,10 @@ comes from the labels of the first dump.
         --out figs --csv figs/transfer_floor.csv [--consistent] [--nominal]
 
 --consistent: models AND floor on consistent labels only (label-only
-run-edge + spike flags, same rules as cer_transfer.analysis.label_audit with the bound flag off).
+run-edge + spike flags, same rules as cer_transfer.analysis.label_audit with
+the bound flag off).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -29,6 +32,7 @@ import csv
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -43,8 +47,9 @@ def groups(shot, chord, frame, lab):
     """Index arrays of labeled points per (shot, chord), frame-sorted."""
     order = np.lexsort((frame, chord, shot))
     so, co = shot[order], chord[order]
-    brk = np.r_[0, np.flatnonzero((so[1:] != so[:-1]) | (co[1:] != co[:-1]))
-                + 1, len(order)]
+    brk = np.r_[
+        0, np.flatnonzero((so[1:] != so[:-1]) | (co[1:] != co[:-1])) + 1, len(order)
+    ]
     lo = lab[order]
     for b0, b1 in zip(brk[:-1], brk[1:]):
         ii = order[b0:b1][lo[b0:b1]]
@@ -53,7 +58,8 @@ def groups(shot, chord, frame, lab):
 
 
 def consistent_mask(y, chord, shot, frame, lab, spike_k=8.0, gap_factor=1.5):
-    """Label-only QC, same rules as cer_transfer.analysis.label_audit (bound flag off)."""
+    """Label-only QC, same rules as cer_transfer.analysis.label_audit
+    (bound flag off)."""
     flag = np.zeros(len(chord), bool)
     trip = [[] for _ in range(y.shape[1])]
     for ii in groups(shot, chord, frame, lab):
@@ -89,34 +95,44 @@ def k_decile(y, s, amp, chord, shot, frame, lab, t, max_gap=10):
             continue
         ok = np.diff(frame[ii]) <= max_gap
         i0, i1 = ii[:-1][ok], ii[1:][ok]
-        z = np.abs(y[i1, t] - y[i0, t]) / np.sqrt(s[i1, t] ** 2
-                                                   + s[i0, t] ** 2)
+        z = np.abs(y[i1, t] - y[i0, t]) / np.sqrt(s[i1, t] ** 2 + s[i0, t] ** 2)
         av = 0.5 * (amp[i1] + amp[i0])
         m = np.isfinite(z) & np.isfinite(av)
-        zs.append(z[m]); az.append(av[m])
+        zs.append(z[m])
+        az.append(av[m])
     z, av = np.concatenate(zs), np.concatenate(az)
     edges = np.quantile(av, np.linspace(0, 1, 11))
     edges[-1] += 1e-9
-    zmed = np.array([np.median(z[(av >= edges[b]) & (av < edges[b + 1])])
-                     for b in range(10)])
+    zmed = np.array(
+        [np.median(z[(av >= edges[b]) & (av < edges[b + 1])]) for b in range(10)]
+    )
     return edges, np.maximum(zmed / max(zmed[0], 1e-9), 1.0)
 
 
 def main():
+    """Command-line entry point."""
     ap = argparse.ArgumentParser()
-    ap.add_argument("--runs", nargs="+", required=True,
-                    help="'label:dump.npz[:linestyle]' per model, plot order")
+    ap.add_argument(
+        "--runs",
+        nargs="+",
+        required=True,
+        help="'label:dump.npz[:linestyle]' per model, plot order",
+    )
     ap.add_argument("--consistent", action="store_true")
-    ap.add_argument("--nominal", action="store_true",
-                    help="also draw 0.674*sigma (no k_d) as a dotted line")
+    ap.add_argument(
+        "--nominal",
+        action="store_true",
+        help="also draw 0.674*sigma (no k_d) as a dotted line",
+    )
     ap.add_argument("--log-y", action="store_true")
     ap.add_argument("--out", type=Path, default=Path("figs"))
     ap.add_argument("--out-name", default=None)
     ap.add_argument("--csv", type=Path, default=None)
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
-    name = a.out_name or ("transfer_floor_consistent" if a.consistent
-                          else "transfer_floor")
+    name = a.out_name or (
+        "transfer_floor_consistent" if a.consistent else "transfer_floor"
+    )
 
     runs = []
     for spec in a.runs:
@@ -127,14 +143,15 @@ def main():
     chord = d0["chord"].astype(np.int64)
     shot, frame = d0["shot"].astype(np.int64), d0["frame"].astype(np.int64)
     y, s = d0["y"].astype(np.float64), d0["sigma"].astype(np.float64)
-    amp = d0["amp"].astype(np.float64)   # log10(m0)/4: monotone in m0
+    amp = d0["amp"].astype(np.float64)  # log10(m0)/4: monotone in m0
     tg = [str(v) for v in d0["targets"]]
     C, T = int(chord.max()) + 1, y.shape[1]
     lab = np.isfinite(y).all(1)
-    sel = consistent_mask(y, chord, shot, frame, lab) if a.consistent \
-        else lab
-    print(f"labeled {lab.sum():,}; evaluated {sel.sum():,} "
-          f"({sel.sum() / lab.sum():.1%})")
+    sel = consistent_mask(y, chord, shot, frame, lab) if a.consistent else lab
+    print(
+        f"labeled {lab.sum():,}; evaluated {sel.sum():,} "
+        f"({sel.sum() / lab.sum():.1%})"
+    )
 
     floor = np.full((C, T), np.nan)
     nom = np.full((C, T), np.nan)
@@ -152,8 +169,9 @@ def main():
     medae = []
     for label, path, _ in runs:
         d = np.load(path)
-        assert np.array_equal(d["shot"], d0["shot"]) and \
-            np.array_equal(d["frame"], d0["frame"]), f"{path}: other list"
+        assert np.array_equal(d["shot"], d0["shot"]) and np.array_equal(
+            d["frame"], d0["frame"]
+        ), f"{path}: other list"
         p = d["pred"].astype(np.float64)
         me = np.full((C, T), np.nan)
         for c in range(C):
@@ -162,22 +180,31 @@ def main():
                 me[c] = np.median(np.abs(p[m] - y[m]), axis=0)
         medae.append(me)
         r = me / floor
-        print(f"{label}: medae/floor per chord, median [min, max]: " +
-              " | ".join(f"{tg[t]} {np.nanmedian(r[:, t]):.2f} "
-                         f"[{np.nanmin(r[:, t]):.2f}, {np.nanmax(r[:, t]):.2f}]"
-                         for t in range(T)))
+        print(
+            f"{label}: medae/floor per chord, median [min, max]: "
+            + " | ".join(
+                f"{tg[t]} {np.nanmedian(r[:, t]):.2f} "
+                f"[{np.nanmin(r[:, t]):.2f}, {np.nanmax(r[:, t]):.2f}]"
+                for t in range(T)
+            )
+        )
 
     if a.csv:
         with open(a.csv, "w", newline="") as f:
             w = csv.writer(f)
-            w.writerow(["chord"] + [f"floor_{x}" for x in tg]
-                       + [f"floor_nominal_{x}" for x in tg]
-                       + [f"medae_{x}_{r[0]}" for r in runs for x in tg])
+            w.writerow(
+                ["chord"]
+                + [f"floor_{x}" for x in tg]
+                + [f"floor_nominal_{x}" for x in tg]
+                + [f"medae_{x}_{r[0]}" for r in runs for x in tg]
+            )
             for c in range(C):
-                w.writerow([c] + [f"{v:.5g}" for v in floor[c]]
-                           + [f"{v:.5g}" for v in nom[c]]
-                           + [f"{me[c, t]:.5g}" for me in medae
-                              for t in range(T)])
+                w.writerow(
+                    [c]
+                    + [f"{v:.5g}" for v in floor[c]]
+                    + [f"{v:.5g}" for v in nom[c]]
+                    + [f"{me[c, t]:.5g}" for me in medae for t in range(T)]
+                )
         print(f"wrote {a.csv}")
 
     cx = np.arange(C)
@@ -185,21 +212,38 @@ def main():
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             fig, axes = plt.subplots(
-                1, 2, figsize=(7.2, 3.0) if ctx == "paper" else (12, 5))
+                1, 2, figsize=(7.2, 3.0) if ctx == "paper" else (12, 5)
+            )
             for t, ax in enumerate(axes):
                 vals = np.concatenate([floor[:, t]] + [m[:, t] for m in medae])
                 lo = 0.6 * np.nanmin(vals[vals > 0])
                 ok = np.isfinite(floor[:, t])
-                ax.fill_between(cx[ok], lo if a.log_y else 0, floor[ok, t],
-                                color="0.82", zorder=0,
-                                label="label-noise floor" if t == 0 else None)
+                ax.fill_between(
+                    cx[ok],
+                    lo if a.log_y else 0,
+                    floor[ok, t],
+                    color="0.82",
+                    zorder=0,
+                    label="label-noise floor" if t == 0 else None,
+                )
                 if a.nominal:
-                    ax.plot(cx, nom[:, t], ":", color="0.4", lw=1,
-                            label="nominal (quoted $\\sigma$)"
-                            if t == 0 else None)
+                    ax.plot(
+                        cx,
+                        nom[:, t],
+                        ":",
+                        color="0.4",
+                        lw=1,
+                        label="nominal (quoted $\\sigma$)" if t == 0 else None,
+                    )
                 for i, ((label, _, ls), me) in enumerate(zip(runs, medae)):
-                    ax.plot(cx, me[:, t], ls, lw=1.6, color=f"C{i}",
-                            label=label if t == 0 else None)
+                    ax.plot(
+                        cx,
+                        me[:, t],
+                        ls,
+                        lw=1.6,
+                        color=f"C{i}",
+                        label=label if t == 0 else None,
+                    )
                 ax.set_xlabel("chord (core $\\rightarrow$ edge)")
                 ax.set_ylabel(ylab[t])
                 if a.log_y:

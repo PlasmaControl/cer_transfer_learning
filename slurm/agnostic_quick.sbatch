@@ -31,6 +31,7 @@ TGT_MACHINE=${TGT_MACHINE:-d3d_tangential}   # tangential chords only (0-47)
 TGT_LIST=${TGT_LIST:-splits/d3d_val.txt}
 EPOCHS=${EPOCHS:-20}
 LIMIT=${LIMIT:-200}                 # discharges used for the zero-shot evaluation
+ATTN=${ATTN:-1}; ATTN_FLAG=""; [ "$ATTN" = "1" ] && ATTN_FLAG="--chord-attention"
 TAG=${TAG:-${SRC_MACHINE}_agnostic_quick}
 OUT=cer_ckpts/$TAG.pt
 LOG="slurm/logs/${SLURM_JOB_NAME}_${TAG}"      # one log per run tag
@@ -43,7 +44,7 @@ RUN="pixi run --frozen"
 echo "=== train agnostic model: $SRC_MACHINE, $TRAIN_LIST, $EPOCHS epochs"
 srun $RUN python -u train.py --machine $SRC_MACHINE --checkpoint "$OUT" \
     --train-list $TRAIN_LIST --val-list $VAL_LIST --epochs $EPOCHS \
-    --agnostic --resample-w 256 \
+    --agnostic $ATTN_FLAG --resample-w 256 \
     --feature-width 128 --hidden-dim 8 --kernel-size 3 --head-type mlp --norm group \
     --batch-size 8 --accumulation-steps 32 --subseq-len 256 --num-workers 8 --no-mmap
 

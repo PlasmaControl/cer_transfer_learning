@@ -7,6 +7,7 @@ campaign, plus a headline pool over selected campaigns.
 Campaign boundaries are APPROXIMATE shot-number ranges -- verify against
 the NSTX run logs and adjust CAMPAIGNS if needed.
 """
+
 import argparse
 import csv
 
@@ -22,6 +23,7 @@ CAMPAIGNS = [  # (label, first shot, last shot) -- approximate, verify
 
 
 def campaign(shot):
+    """NSTX campaign label of a shot number (approximate ranges)."""
     s = int(shot)
     for lab, a, b in CAMPAIGNS:
         if a <= s <= b:
@@ -30,28 +32,39 @@ def campaign(shot):
 
 
 def summarize(rows, title):
-    f = lambda k: np.array([float(r[k]) for r in rows
-                            if r.get(k) not in (None, "", "nan")])
-    print(f"{title}: {len(rows)} discharges, "
-          f"{int(sum(float(r['n_pairs']) for r in rows))} edge pairs")
+    """Print pooled medians of the edge-test columns for a set of rows."""
+    f = lambda k: np.array(
+        [float(r[k]) for r in rows if r.get(k) not in (None, "", "nan")]
+    )
+    print(
+        f"{title}: {len(rows)} discharges, "
+        f"{int(sum(float(r['n_pairs']) for r in rows))} edge pairs"
+    )
     for tn, u in (("vtor", "km/s"), ("ti", "eV")):
         o, n = f(f"{tn}_off"), f(f"{tn}_on")
         ra, fc = f(f"{tn}_ratio"), f(f"{tn}_fitchange")
         if not ra.size:
             print(f"  {tn}: no data")
             continue
-        print(f"  {tn} ({u}), n={ra.size}: beam off {np.median(o):.3g} | "
-              f"beam on {np.median(n):.3g} | ratio median "
-              f"{np.median(ra):.2f} (IQR {np.percentile(ra, 25):.2f}-"
-              f"{np.percentile(ra, 75):.2f}) | change of fits themselves "
-              f"{np.nanmedian(fc) if fc.size else float('nan'):.3g}")
+        print(
+            f"  {tn} ({u}), n={ra.size}: beam off {np.median(o):.3g} | "
+            f"beam on {np.median(n):.3g} | ratio median "
+            f"{np.median(ra):.2f} (IQR {np.percentile(ra, 25):.2f}-"
+            f"{np.percentile(ra, 75):.2f}) | change of fits themselves "
+            f"{np.nanmedian(fc) if fc.size else float('nan'):.3g}"
+        )
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("csv", nargs="+")
-    p.add_argument("--select", type=str, default=None,
-                   help="comma-separated campaigns for a headline pool")
+    p.add_argument(
+        "--select",
+        type=str,
+        default=None,
+        help="comma-separated campaigns for a headline pool",
+    )
     args = p.parse_args()
     rows, seen = [], set()
     for path in args.csv:
@@ -66,8 +79,10 @@ def main():
             summarize(sub, lab)
     if args.select:
         sel = {s.strip() for s in args.select.split(",")}
-        summarize([r for r in rows if campaign(r["shot"]) in sel],
-                  "SELECTED " + "+".join(sorted(sel)))
+        summarize(
+            [r for r in rows if campaign(r["shot"]) in sel],
+            "SELECTED " + "+".join(sorted(sel)),
+        )
 
 
 if __name__ == "__main__":

@@ -16,6 +16,7 @@ the opposite axes of what the parameter names suggested. Defaults below
 reproduce that EFFECTIVE behavior (T<=120, W<=200); rename-adjust if the
 original intent was the other way around.
 """
+
 from __future__ import annotations
 
 import torch
@@ -24,19 +25,41 @@ from torchaudio.transforms import FrequencyMasking, TimeMasking
 
 
 class AugmentationPipeline(nn.Module):
-    def __init__(self, wavelength_mask_param: int = 200,
-                 time_mask_param: int = 120):
+    """SpecAugment-style masking of random wavelength and time bands.
+
+    Parameters
+    ----------
+    wavelength_mask_param : int, default=200
+        Maximum width (bins) of the wavelength mask.
+    time_mask_param : int, default=120
+        Maximum width (frames) of the time mask.
+    """
+
+    def __init__(self, wavelength_mask_param: int = 200, time_mask_param: int = 120):
         super().__init__()
         # On (B, C, T, W): FrequencyMasking masks dim -2 (our T),
         # TimeMasking masks dim -1 (our W). Map accordingly.
         self.spec_aug = nn.Sequential(
-            TimeMasking(time_mask_param=wavelength_mask_param,
-                        iid_masks=True),          # masks W
-            FrequencyMasking(freq_mask_param=time_mask_param,
-                             iid_masks=True),     # masks T
+            TimeMasking(
+                time_mask_param=wavelength_mask_param, iid_masks=True
+            ),  # masks W
+            FrequencyMasking(
+                freq_mask_param=time_mask_param, iid_masks=True
+            ),  # masks T
         )
 
     def forward(self, spec: torch.Tensor) -> torch.Tensor:
+        """Apply the masks (in training mode only).
+
+        Parameters
+        ----------
+        spec : Tensor of shape (B, C, T, W)
+
+        Returns
+        -------
+        Tensor
+            Same shape, with one random band in time and in wavelength zeroed.
+        """
         if not self.training:
             return spec
         return self.spec_aug(spec)

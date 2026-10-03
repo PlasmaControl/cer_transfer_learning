@@ -124,6 +124,7 @@ def main():
             tmp / "d3d_agnostic.pt",
             *common,
             "--agnostic",
+            "--chord-attention",
             "--resample-w",
             "256",
         ],

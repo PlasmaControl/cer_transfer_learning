@@ -9,6 +9,7 @@ r500 is a subset of r1000 ... of r8000. Pool = the D3D config train_dir
 the config val_dir for every size. Generate ONCE; never regenerate after
 runs start (the lists define the study).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -20,6 +21,7 @@ from cer_transfer.configs import data_path, get_machine, list_entry
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--sizes", type=int, nargs="+", required=True)
     p.add_argument("--seed", type=int, default=42)
@@ -36,11 +38,15 @@ def main():
             raise SystemExit(f"size {k} > pool {len(pool)}")
         f = a.out / f"d3d_train_r{k}.txt"
         if f.exists():
-            raise SystemExit(f"{f} exists -- lists are write-once; "
-                             "delete by hand only if no run used it")
+            raise SystemExit(
+                f"{f} exists -- lists are write-once; "
+                "delete by hand only if no run used it"
+            )
         sel = sorted(list_entry(pool[i]) for i in order[:k])
-        f.write_text(f"# seed={a.seed} nested prefix of permutation, "
-                     f"pool={len(pool)}\n" + "\n".join(sel) + "\n")
+        f.write_text(
+            f"# seed={a.seed} nested prefix of permutation, "
+            f"pool={len(pool)}\n" + "\n".join(sel) + "\n"
+        )
         print(f"  {f}  ({k} shots)")
 
 

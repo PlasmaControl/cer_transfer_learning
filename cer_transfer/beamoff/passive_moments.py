@@ -22,6 +22,7 @@ Protocol per chord:
         --fg-file "$(cat gallery/bo_141710_fg.txt)" \
         [--csv gallery/moments_pool.csv]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -31,24 +32,30 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
+from cer_transfer.beamstate import beam_state, valid_end
 from cer_transfer.configs import data_path
-from cer_transfer.beamstate import valid_end
-
-from cer_transfer.beamstate import beam_state
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--shot", type=str, required=True)
-    p.add_argument("--bg", type=Path, required=True,
-                   help="passive-model npz (eval_checkpoint --dump-preds)")
+    p.add_argument(
+        "--bg",
+        type=Path,
+        required=True,
+        help="passive-model npz (eval_checkpoint --dump-preds)",
+    )
     p.add_argument("--bg-file", type=Path, required=True)
     p.add_argument("--fg-file", type=Path, required=True)
     p.add_argument("--halfwin", type=int, default=8)
     p.add_argument("--min-r", type=float, default=0.7)
     p.add_argument("--min-fits", type=int, default=12)
-    p.add_argument("--include-head", action="store_true",
-                   help="also use startup-phase beam-off frames")
+    p.add_argument(
+        "--include-head",
+        action="store_true",
+        help="also use startup-phase beam-off frames",
+    )
     p.add_argument("--csv", type=Path, default=None)
     args = p.parse_args()
 
@@ -68,7 +75,7 @@ def main():
     off = np.zeros(T, bool)
     for a, b, cls, ok, _ in st["segments"]:
         if ok and (args.include_head or cls != "head"):
-            off[a:min(b, T - 1) + 1] = True
+            off[a : min(b, T - 1) + 1] = True
     W = spec.shape[-1]
     pix = np.arange(W, dtype=np.float64)
 
@@ -91,8 +98,9 @@ def main():
         cen = np.full(T, np.nan)
         var = np.full(T, np.nan)
         cen[good] = (w[good] * pix[lo:hi]).sum(axis=1) / s[good]
-        var[good] = (w[good] * (pix[lo:hi] - cen[good, None]) ** 2
-                     ).sum(axis=1) / s[good]
+        var[good] = (w[good] * (pix[lo:hi] - cen[good, None]) ** 2).sum(axis=1) / s[
+            good
+        ]
         feat = (var, cen)  # Ti ~ variance, vtor ~ centroid
         fr = fr[np.isfinite(cen[fr])]
         cal, val = fr[0::2], fr[1::2]
@@ -123,10 +131,12 @@ def main():
                 res[tn].append((c, r, ref_on, nn_on, d_off, n))
 
     n_off = int(off.sum())
-    print(f"shot {args.shot}: {n_off} verified beam-off frames "
-          f"({'incl.' if args.include_head else 'excl.'} startup); "
-          f"{used} chords with a valid moment reference "
-          f"(held-out beam-on correlation >= {args.min_r})")
+    print(
+        f"shot {args.shot}: {n_off} verified beam-off frames "
+        f"({'incl.' if args.include_head else 'excl.'} startup); "
+        f"{used} chords with a valid moment reference "
+        f"(held-out beam-on correlation >= {args.min_r})"
+    )
     row = {"shot": args.shot, "n_off": n_off, "n_chords": used}
     for tn, u in names:
         if not res[tn]:
@@ -136,24 +146,40 @@ def main():
         chs = [r_[0] for r_ in res[tn]]
         r_m, ref_on, nn_on, d_off = np.median(a, axis=0)
         print(f"  {tn} ({u}), chords {chs}:")
-        print(f"    beam on, held-out fits: moment reference error "
-              f"{ref_on:.3g} | network error {nn_on:.3g} "
-              f"(median corr of reference {r_m:.2f})")
-        print(f"    beam off: |network - moment reference| {d_off:.3g}  "
-              f"(x{d_off / ref_on:.2f} the reference's own beam-on error)")
-        row.update({f"{tn}_ref_on": ref_on, f"{tn}_nn_on": nn_on,
-                    f"{tn}_d_off": d_off, f"{tn}_ratio": d_off / ref_on})
+        print(
+            f"    beam on, held-out fits: moment reference error "
+            f"{ref_on:.3g} | network error {nn_on:.3g} "
+            f"(median corr of reference {r_m:.2f})"
+        )
+        print(
+            f"    beam off: |network - moment reference| {d_off:.3g}  "
+            f"(x{d_off / ref_on:.2f} the reference's own beam-on error)"
+        )
+        row.update(
+            {
+                f"{tn}_ref_on": ref_on,
+                f"{tn}_nn_on": nn_on,
+                f"{tn}_d_off": d_off,
+                f"{tn}_ratio": d_off / ref_on,
+            }
+        )
     if args.csv is not None:
         fields = ["shot", "n_off", "n_chords"] + [
-            f"{tn}_{k}" for tn, _ in names
-            for k in ("ref_on", "nn_on", "d_off", "ratio")]
+            f"{tn}_{k}"
+            for tn, _ in names
+            for k in ("ref_on", "nn_on", "d_off", "ratio")
+        ]
         new = not args.csv.exists()
         with open(args.csv, "a", newline="") as fh:
             wr = csv.DictWriter(fh, fieldnames=fields, restval="")
             if new:
                 wr.writeheader()
-            wr.writerow({k: (f"{float(v):.4g}" if isinstance(
-                v, (float, np.floating)) else v) for k, v in row.items()})
+            wr.writerow(
+                {
+                    k: (f"{float(v):.4g}" if isinstance(v, (float, np.floating)) else v)
+                    for k, v in row.items()
+                }
+            )
 
 
 if __name__ == "__main__":

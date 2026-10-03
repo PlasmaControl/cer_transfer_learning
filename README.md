@@ -218,7 +218,10 @@ sbatch slurm/finetune_agnostic_nstx_r325.sbatch  # supervised comparison on 325 
 accept the override for agnostic checkpoints only. `cer_transfer.analysis.affine_fit`
 reports, per target, the slope and offset between predictions and conventional fits
 and the R2 that remains after that affine correction, which separates a mere scale
-mismatch between spectrometers from a real transfer error. The per-chord stem makes
+mismatch between spectrometers from a real transfer error. `--chord-attention` lets each chord attend over all chords of
+the same frame (permutation-invariant, no positional information) before the readout;
+without it a chord sees only its own stem features and the chord-averaged trunk map.
+The per-chord stem makes
 activations scale with the chord count: use `--batch-size 8 --accumulation-steps 32`
 (about 24 GB) instead of batch 256.
 

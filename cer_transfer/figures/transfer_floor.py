@@ -13,12 +13,14 @@ label uncertainties in the data files).
         --floor-list splits/nstx_val.txt \
         --out figs [--out-name transfer_floor]
 """
+
 from __future__ import annotations
 
 import argparse
 from pathlib import Path
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,8 +37,12 @@ def label_floor(list_path: Path, scale, limit: int = 0):
     scale: MachineConfig.target_scale -- files may store other units
     (NSTX: Ti in keV); the same transform the training data applies."""
     from joblib import load
-    files = [ln.strip() for ln in list_path.read_text().splitlines()
-             if ln.strip() and not ln.strip().startswith("#")]
+
+    files = [
+        ln.strip()
+        for ln in list_path.read_text().splitlines()
+        if ln.strip() and not ln.strip().startswith("#")
+    ]
     if limit:
         files = files[:limit]
     acc = None
@@ -60,20 +66,36 @@ def label_floor(list_path: Path, scale, limit: int = 0):
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
-    p.add_argument("--runs", nargs="+", required=True,
-                   help="'label:per_chord.csv' per run, plot order")
+    p.add_argument(
+        "--runs",
+        nargs="+",
+        required=True,
+        help="'label:per_chord.csv' per run, plot order",
+    )
     p.add_argument("--floor-list", type=Path, required=True)
-    p.add_argument("--machine", type=str, default="nstx",
-                   help="registry machine for target_scale (file units "
-                        "-> physical units), matching the training data")
-    p.add_argument("--floor-limit", type=int, default=0,
-                   help="cap shots scanned for the floor (0 = all)")
+    p.add_argument(
+        "--machine",
+        type=str,
+        default="nstx",
+        help="registry machine for target_scale (file units "
+        "-> physical units), matching the training data",
+    )
+    p.add_argument(
+        "--floor-limit",
+        type=int,
+        default=0,
+        help="cap shots scanned for the floor (0 = all)",
+    )
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", type=str, default="transfer_floor")
-    p.add_argument("--log-y", action="store_true",
-                   help="log error axis: keeps mid-array differences "
-                        "visible against the large edge errors")
+    p.add_argument(
+        "--log-y",
+        action="store_true",
+        help="log error axis: keeps mid-array differences "
+        "visible against the large edge errors",
+    )
     args = p.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
 
@@ -87,13 +109,13 @@ def main():
             ls = "-"
         runs.append((label, pd.read_csv(path), ls))
     from cer_transfer.configs import get_machine
+
     scale = get_machine(args.machine).target_scale
     fl = label_floor(args.floor_list, scale, args.floor_limit)
     cx = np.arange(len(fl))
 
     cols = ("medae_ti", "medae_vtor")
-    names = ("median $|T_i$ error$|$ (eV)",
-             "median $|v_{tor}$ error$|$ (km/s)")
+    names = ("median $|T_i$ error$|$ (eV)", "median $|v_{tor}$ error$|$ (km/s)")
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             size = (7.2, 3.0) if ctx == "paper" else (12, 5)
@@ -101,17 +123,27 @@ def main():
             for t, ax in enumerate(axes):
                 pos = np.concatenate(
                     [fl[:, t][np.isfinite(fl[:, t]) & (fl[:, t] > 0)]]
-                    + [df[cols[t]].to_numpy() for _, df, _ in runs])
+                    + [df[cols[t]].to_numpy() for _, df, _ in runs]
+                )
                 lo = 0.6 * np.nanmin(pos[pos > 0])
                 hi = 1.5 * np.nanmax(pos)
-                ax.fill_between(cx, lo if args.log_y else 0, fl[:, t],
-                                color="0.82",
-                                label="label-noise floor"
-                                if t == 0 else None, zorder=0)
+                ax.fill_between(
+                    cx,
+                    lo if args.log_y else 0,
+                    fl[:, t],
+                    color="0.82",
+                    label="label-noise floor" if t == 0 else None,
+                    zorder=0,
+                )
                 for i, (label, df, ls) in enumerate(runs):
-                    ax.plot(df["chord"], df[cols[t]], ls, lw=1.6,
-                            color=f"C{i}",
-                            label=label if t == 0 else None)
+                    ax.plot(
+                        df["chord"],
+                        df[cols[t]],
+                        ls,
+                        lw=1.6,
+                        color=f"C{i}",
+                        label=label if t == 0 else None,
+                    )
                 ax.set_xlabel("chord (core -> edge)")
                 ax.set_ylabel(names[t])
                 if args.log_y:
@@ -121,11 +153,14 @@ def main():
                     ax.set_ylim(bottom=0)
             axes[0].legend(fontsize="small", loc="upper right")
             fig.tight_layout()
-            fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300,
-                        bbox_inches="tight")
+            fig.savefig(
+                args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches="tight"
+            )
             plt.close(fig)
-    print(f"wrote {args.out}/{args.out_name}.png/.pdf | "
-          f"{len(runs)} runs, floor from {args.floor_list.name}")
+    print(
+        f"wrote {args.out}/{args.out_name}.png/.pdf | "
+        f"{len(runs)} runs, floor from {args.floor_list.name}"
+    )
 
 
 if __name__ == "__main__":

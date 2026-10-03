@@ -21,6 +21,7 @@ listed in the report.
 Deterministic under --seed. Test set discipline: generate ONCE, commit the
 lists, never regenerate after experiments begin.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -33,6 +34,7 @@ from cer_transfer.configs import get_machine, list_entry
 
 
 def shot_summary(fp: Path, machine):
+    """Per-shot label statistics used by the split rules, or a rejection reason."""
     d = load(fp, mmap_mode="r")
     end = int(d["end_index"])
     if end <= 0:
@@ -53,6 +55,7 @@ def shot_summary(fp: Path, machine):
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--machine", required=True)
     p.add_argument("--dir", type=Path, required=True)
@@ -60,8 +63,13 @@ def main():
     p.add_argument("--val-frac", type=float, default=0.15)
     p.add_argument("--test-frac", type=float, default=0.15)
     p.add_argument("--n-strata", type=int, default=5)
-    p.add_argument("--subsets", type=int, nargs="*", default=[],
-                   help="nested scaling-curve sizes, e.g. 25 50 100 200 400")
+    p.add_argument(
+        "--subsets",
+        type=int,
+        nargs="*",
+        default=[],
+        help="nested scaling-curve sizes, e.g. 25 50 100 200 400",
+    )
     p.add_argument("--seed", type=int, default=42)
     args = p.parse_args()
 
@@ -98,8 +106,8 @@ def main():
         n_test = int(round(n * args.test_frac))
         n_val = int(round(n * args.val_frac))
         test += [usable[i] for i in idx[:n_test]]
-        val += [usable[i] for i in idx[n_test:n_test + n_val]]
-        train += [usable[i] for i in idx[n_test + n_val:]]
+        val += [usable[i] for i in idx[n_test : n_test + n_val]]
+        train += [usable[i] for i in idx[n_test + n_val :]]
 
     # nested scaling subsets from the train pool, rotation-stratified order
     train_v = {fp: vmeds[usable.index(fp)] for fp in train}
@@ -119,6 +127,7 @@ def main():
     args.out.mkdir(parents=True, exist_ok=True)
 
     def write(name, paths):
+        """Write one split list."""
         f = args.out / f"{args.machine}_{name}.txt"
         f.write_text("\n".join(list_entry(p) for p in sorted(paths)) + "\n")
         print(f"  {f}  ({len(paths)} shots)")
@@ -133,20 +142,23 @@ def main():
         write(f"train_n{k}", interleaved[:k])
 
     # report
-    rep = [f"machine={args.machine} seed={args.seed} "
-           f"total={len(files)} usable={len(usable)} excluded={len(excluded)}",
-           f"split: train={len(train)} val={len(val)} test={len(test)}",
-           "", "|vtor| median (km/s) per split:"]
+    rep = [
+        f"machine={args.machine} seed={args.seed} "
+        f"total={len(files)} usable={len(usable)} excluded={len(excluded)}",
+        f"split: train={len(train)} val={len(val)} test={len(test)}",
+        "",
+        "|vtor| median (km/s) per split:",
+    ]
     for name, paths in (("train", train), ("val", val), ("test", test)):
-        v = np.array([train_v.get(fp, vmeds[usable.index(fp)])
-                      for fp in paths])
-        rep.append(f"  {name:5s} median {np.median(v):7.2f}  "
-                   f"p10 {np.percentile(v, 10):7.2f}  "
-                   f"p90 {np.percentile(v, 90):7.2f}")
+        v = np.array([train_v.get(fp, vmeds[usable.index(fp)]) for fp in paths])
+        rep.append(
+            f"  {name:5s} median {np.median(v):7.2f}  "
+            f"p10 {np.percentile(v, 10):7.2f}  "
+            f"p90 {np.percentile(v, 90):7.2f}"
+        )
     if excluded:
         rep += ["", "excluded:"] + [f"  {fp.name}: {r}" for fp, r in excluded]
-    (args.out / f"{args.machine}_split_report.txt").write_text(
-        "\n".join(rep) + "\n")
+    (args.out / f"{args.machine}_split_report.txt").write_text("\n".join(rep) + "\n")
     print("\n".join(rep))
 
 

@@ -217,6 +217,11 @@ def main():
         "requires --feature-width",
     )
     p.add_argument(
+        "--chord-attention",
+        action="store_true",
+        help="agnostic mode: attention over chords (per frame) before the readout",
+    )
+    p.add_argument(
         "--resample-w",
         type=int,
         default=None,
@@ -285,6 +290,7 @@ def main():
         feature_width=args.feature_width,
         moment_features=args.moment_features,
         agnostic=args.agnostic,
+        chord_attention=args.chord_attention,
         resample_w=args.resample_w,
     )
 
