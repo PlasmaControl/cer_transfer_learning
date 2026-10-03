@@ -4,6 +4,7 @@ No machine-specific literals here. All channel selection and preprocessing
 parameters come from MachineConfig, so DIII-D and NSTX data go through the
 identical code path.
 """
+
 from __future__ import annotations
 
 import random
@@ -36,8 +37,23 @@ class Preprocessor:
     shots is handled by per-shot batching + the encoder's adaptive pooling.
     """
 
-    def __init__(self, machine: MachineConfig):
+    def __init__(
+        self,
+        machine: MachineConfig,
+        resample_w: Optional[int] = None,
+        w_scale: float = 1.0,
+        flip_w: bool = False,
+    ):
         self.baseline_region = machine.baseline_region
+        self.resample_w = resample_w
+        # axis-convention probes for zero-shot transfer: stretch the
+        # wavelength axis by w_scale (resample to w_scale * resample_w bins,
+        # then centre-crop or edge-pad back to resample_w) and/or reverse it
+        # combined with the machine's convention relative to the NSTX reference
+        # (flip, dispersion ratio); without resample_w nothing is applied, so
+        # the default pipeline is unchanged
+        self.w_scale = w_scale * (machine.wavelength_scale if resample_w else 1.0)
+        self.flip_w = flip_w != (bool(machine.wavelength_flip) if resample_w else False)
 
     def __call__(self, spec: np.ndarray) -> torch.Tensor:
         """spec: (C, T, W) float array -> log10 spectrogram tensor."""
@@ -48,7 +64,29 @@ class Preprocessor:
         else:
             offset = torch.amin(t, dim=(1, 2), keepdim=True)  # per channel
         t = t - (offset - 1.0)
-        return torch.log10(t)
+        t = torch.log10(t)
+        if self.flip_w:
+            t = torch.flip(t, dims=(-1,))
+        if self.resample_w is not None:
+            c, n, w = t.shape
+            target = max(int(round(self.resample_w * self.w_scale)), 2)
+            if target != w:
+                # plain linear interpolation along the wavelength axis
+                t = torch.nn.functional.interpolate(
+                    t.reshape(c * n, 1, w),
+                    size=target,
+                    mode="linear",
+                    align_corners=False,
+                ).reshape(c, n, target)
+            if target > self.resample_w:  # centre crop
+                a = (target - self.resample_w) // 2
+                t = t[..., a : a + self.resample_w]
+            elif target < self.resample_w:  # edge pad
+                pad = self.resample_w - target
+                t = torch.nn.functional.pad(
+                    t, (pad // 2, pad - pad // 2), mode="replicate"
+                )
+        return t
 
 
 class ShotDataset(Dataset):
@@ -67,6 +105,9 @@ class ShotDataset(Dataset):
         mmap: bool = True,
         max_label_relerr: float = 0.0,
         zero_dark_frames: bool = False,
+        resample_w: Optional[int] = None,
+        w_scale: float = 1.0,
+        flip_w: bool = False,
     ):
         """mmap=True: memory-map files, materialize slices via page faults
         (random small reads — latency-bound on GPFS). mmap=False: read each
@@ -78,15 +119,15 @@ class ShotDataset(Dataset):
         self.machine = machine
         self.subseq_len = subseq_len
         self.mmap = mmap
-        self.preprocess = Preprocessor(machine)
+        self.preprocess = Preprocessor(machine, resample_w, w_scale, flip_w)
 
         self._input_idx = (
-            None if machine.input_channel_indices is None
+            None
+            if machine.input_channel_indices is None
             else np.asarray(machine.input_channel_indices)
         )
         self._chord_idx = (
-            None if machine.chord_indices is None
-            else np.asarray(machine.chord_indices)
+            None if machine.chord_indices is None else np.asarray(machine.chord_indices)
         )
         # unit conversion into canonical units (ti: eV, vtor: km/s),
         # broadcast over (C, T, n_targets); identity when all ones
@@ -101,8 +142,10 @@ class ShotDataset(Dataset):
         self._opened_files: Optional[dict] = None
 
         if not self.file_paths:
-            raise ValueError("ShotDataset got an empty file list — check the "
-                             "data directory / glob pattern")
+            raise ValueError(
+                "ShotDataset got an empty file list — check the "
+                "data directory / glob pattern"
+            )
 
         # Build the subsequence index by opening each file once to read
         # end_index (handle dropped immediately; same reads as the original
@@ -128,17 +171,22 @@ class ShotDataset(Dataset):
                 for chunk in range(n_samples // self.subseq_len):
                     self.subseq_info.append((f_idx, chunk * self.subseq_len))
         _dt = time.time() - _t0
-        print(f"indexed {len(self.file_paths)} files in {_dt:.1f}s "
-              f"({1e3 * _dt / len(self.file_paths):.1f} ms/file effective)",
-              flush=True)
+        print(
+            f"indexed {len(self.file_paths)} files in {_dt:.1f}s "
+            f"({1e3 * _dt / len(self.file_paths):.1f} ms/file effective)",
+            flush=True,
+        )
         if self.subseq_len != -1:
             contributing = {f for f, _ in self.subseq_info}
             n_empty = len(self.file_paths) - len(contributing)
             if n_empty:
-                print(f"WARNING: {n_empty}/{len(self.file_paths)} shots "
-                      f"yield NO subsequences (end_index < subseq_len="
-                      f"{self.subseq_len}) and are effectively excluded — "
-                      f"consider a smaller --subseq-len", flush=True)
+                print(
+                    f"WARNING: {n_empty}/{len(self.file_paths)} shots "
+                    f"yield NO subsequences (end_index < subseq_len="
+                    f"{self.subseq_len}) and are effectively excluded — "
+                    f"consider a smaller --subseq-len",
+                    flush=True,
+                )
 
     def __len__(self) -> int:
         return len(self.subseq_info)
@@ -148,6 +196,7 @@ class ShotDataset(Dataset):
         # access and caches the handle. Spreads ~N_files opens over the first
         # epoch's batches instead of a multi-minute silent wall per worker —
         # and per epoch, if workers are not persistent.
+        """Reset per-worker file caches (called from ``worker_init_fn``)."""
         self._opened_files = {}
 
     def _get_file(self, f_idx: int):
@@ -159,9 +208,11 @@ class ShotDataset(Dataset):
                 # handle cache would then hoard fully-loaded dicts and grow
                 # without bound over an epoch. Refuse rather than OOM.
                 arr = d["input"]
-                if not (isinstance(arr, np.memmap) or
-                        getattr(arr, "base", None) is not None and
-                        isinstance(arr.base, np.memmap)):
+                if not (
+                    isinstance(arr, np.memmap)
+                    or getattr(arr, "base", None) is not None
+                    and isinstance(arr.base, np.memmap)
+                ):
                     raise RuntimeError(
                         f"{self.file_paths[f_idx]} appears to be compressed "
                         "(mmap not honored). Use --no-mmap for compressed "
@@ -195,8 +246,10 @@ class ShotDataset(Dataset):
             target = target * self._target_scale
             error = error * self._target_scale
         if self.max_label_relerr > 0:
-            bad = ~(np.abs(error) <=
-                    self.max_label_relerr * np.maximum(np.abs(target), 1e-12))
+            bad = ~(
+                np.abs(error)
+                <= self.max_label_relerr * np.maximum(np.abs(target), 1e-12)
+            )
             if bad.any():
                 target = np.where(bad, np.nan, target)
 
@@ -207,6 +260,7 @@ class ShotDataset(Dataset):
             # light (beam off, plasma present) do NOT qualify: their
             # per-chord amplitudes stay well above the dark level.
             from cer_transfer.dark import dark_mask
+
             # shared criterion (cer_transfer.dark): outside the labeled
             # span (labels imply plasma, plasma persists) AND below a
             # noise-anchored amplitude floor; beam-off-with-plasma frames
@@ -218,9 +272,11 @@ class ShotDataset(Dataset):
                 # modest confidence: sigma = machine-configured dark
                 # sigmas, broadcast over targets
                 for ti_, s_ in enumerate(self.machine.dark_sigma):
-                    zsig[:, :, ti_] = s_ * (self._target_scale[ti_]
-                                            if self._target_scale is not None
-                                            else 1.0)
+                    zsig[:, :, ti_] = s_ * (
+                        self._target_scale[ti_]
+                        if self._target_scale is not None
+                        else 1.0
+                    )
                 m = unl & dark[None, :, None]
                 target = np.where(m, 0.0, target)
                 error = np.where(m, zsig, error)
@@ -231,14 +287,14 @@ class ShotDataset(Dataset):
         wts = np.clip(spec - med, 0.0, None)
         m0 = wts.sum(axis=-1) + 1e-6
         W_ = spec.shape[-1]
-        xg = ((np.arange(W_, dtype=np.float32) - W_ / 2.0) / W_)
+        xg = (np.arange(W_, dtype=np.float32) - W_ / 2.0) / W_
         m1 = (wts * xg).sum(axis=-1) / m0
-        var = (wts * (xg[None, None, :] - m1[..., None]) ** 2).sum(axis=-1) \
-            / m0
+        var = (wts * (xg[None, None, :] - m1[..., None]) ** 2).sum(axis=-1) / m0
         m2 = np.sqrt(np.clip(var, 0.0, None))
         # rough O(1) scaling: log-amplitude/4, centroid*4, width*20
-        moments = np.stack([np.log10(m0 + 1.0) / 4.0, m1 * 4.0, m2 * 20.0],
-                           axis=-1).astype(np.float32)
+        moments = np.stack(
+            [np.log10(m0 + 1.0) / 4.0, m1 * 4.0, m2 * 20.0], axis=-1
+        ).astype(np.float32)
 
         spec_t = self.preprocess(spec)
 
@@ -258,18 +314,28 @@ class ShotDataset(Dataset):
 
 
 def worker_init_fn(worker_id: int) -> None:
+    """DataLoader worker initializer: resets the dataset's per-worker caches.
+
+    Parameters
+    ----------
+    worker_id : int
+        Worker index assigned by the DataLoader.
+    """
     get_worker_info().dataset.worker_init()
 
 
-def compute_tail_weights(dataset, gamma: float,
-                         quantile: float = 0.90) -> dict:
+def compute_tail_weights(dataset, gamma: float, quantile: float = 0.90) -> dict:
     """{f_idx: weight} with weight = (q_shot / median_q)^gamma, where q_shot
     is the per-shot `quantile` of |vtor| labels (canonical km/s). gamma=0 ->
     uniform. Cheap pass: reads target arrays only."""
     from joblib import load as _jload
+
     scale = float(np.asarray(dataset.machine.target_scale)[1])
-    chord_idx = (None if dataset.machine.chord_indices is None
-                 else np.asarray(dataset.machine.chord_indices))
+    chord_idx = (
+        None
+        if dataset.machine.chord_indices is None
+        else np.asarray(dataset.machine.chord_indices)
+    )
     q = {}
     for f_idx, fp in enumerate(dataset.file_paths):
         d = _jload(fp, mmap_mode="r" if dataset.mmap else None)
@@ -281,8 +347,7 @@ def compute_tail_weights(dataset, gamma: float,
         if chord_idx is not None:
             v = v[chord_idx]
         v = np.abs(v * scale)
-        q[f_idx] = (float(np.nanquantile(v, quantile))
-                    if np.isfinite(v).any() else 0.0)
+        q[f_idx] = float(np.nanquantile(v, quantile)) if np.isfinite(v).any() else 0.0
     med = np.median([x for x in q.values() if x > 0]) or 1.0
     return {f: max((x / med), 1e-3) ** gamma for f, x in q.items()}
 
@@ -292,9 +357,13 @@ class PerShotBatchSampler(Sampler):
     within-shot order shuffled each epoch (seedable via a torch.Generator
     for reproducible HPO)."""
 
-    def __init__(self, dataset: ShotDataset, batch_size: int,
-                 generator: Optional[torch.Generator] = None,
-                 shot_weights: Optional[dict] = None):
+    def __init__(
+        self,
+        dataset: ShotDataset,
+        batch_size: int,
+        generator: Optional[torch.Generator] = None,
+        shot_weights: Optional[dict] = None,
+    ):
         """shot_weights: optional {f_idx: weight}; when given, each epoch
         draws len(file_list) shots WITH replacement, probability
         proportional to weight (tail oversampling for imbalanced
@@ -307,8 +376,10 @@ class PerShotBatchSampler(Sampler):
         self.file_list = list(self.file_to_indices)
         self.shot_weights = None
         if shot_weights:
-            w = torch.tensor([float(shot_weights.get(f, 1.0))
-                              for f in self.file_list], dtype=torch.float64)
+            w = torch.tensor(
+                [float(shot_weights.get(f, 1.0)) for f in self.file_list],
+                dtype=torch.float64,
+            )
             self.shot_weights = torch.clamp(w, min=0) + 1e-12
 
     def _shuffled(self, seq):
@@ -322,15 +393,18 @@ class PerShotBatchSampler(Sampler):
     def __iter__(self):
         if self.shot_weights is not None:
             order = torch.multinomial(
-                self.shot_weights, len(self.file_list), replacement=True,
-                generator=self.generator).tolist()
+                self.shot_weights,
+                len(self.file_list),
+                replacement=True,
+                generator=self.generator,
+            ).tolist()
             shots = [self.file_list[i] for i in order]
         else:
             shots = self._shuffled(self.file_list)
         for f_idx in shots:
             idxs = self._shuffled(self.file_to_indices[f_idx])
             for s in range(0, len(idxs), self.batch_size):
-                yield idxs[s:s + self.batch_size]
+                yield idxs[s : s + self.batch_size]
 
     def __len__(self) -> int:
         return sum(

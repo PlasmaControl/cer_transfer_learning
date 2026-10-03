@@ -5,6 +5,7 @@ frames and labeled (plasma) frames, plus boundary-risk count.
     pixi run python -u -m cer_transfer.analysis.dark_audit --list splits/nstx_passive_train.txt \
         --sample 200
 """
+
 import argparse
 from pathlib import Path
 
@@ -38,20 +39,30 @@ for f in files:
     idx = np.flatnonzero(~lab & (r < a.thresh))
     if idx.size and lab.any():
         libx = np.flatnonzero(lab)
-        boundary += int((np.abs(idx[:, None] - libx[None, :]).min(axis=1)
-                         <= 3).sum())
+        boundary += int((np.abs(idx[:, None] - libx[None, :]).min(axis=1) <= 3).sum())
 
-r_dark = np.concatenate(r_dark); r_plasma = np.concatenate(r_plasma)
+r_dark = np.concatenate(r_dark)
+r_plasma = np.concatenate(r_plasma)
 sel = r_dark < a.thresh
-print(f"files: {len(files)} | label-free frames: {r_dark.size} "
-      f"({sel.mean()*100:.1f}% below thresh={a.thresh}) | "
-      f"labeled frames: {r_plasma.size}")
-print(f"label-free frames: p50 {np.percentile(r_dark,50)*100:.2f}%  "
-      f"p95 {np.percentile(r_dark,95)*100:.2f}% of shot max")
-print(f"labeled (plasma) frames: p5 {np.percentile(r_plasma,5)*100:.1f}%  "
-      f"p50 {np.percentile(r_plasma,50)*100:.1f}%")
-print(f"would-be-dark frames within 3 frames of a label: {boundary} "
-      f"(boundary risk; should be ~0)")
-print("VERDICT: safe if labeled-p5 >> thresh and boundary ~ 0; if "
-      "label-free p95 crowds the threshold, dim beam-off phases exist "
-      "and the threshold must drop (or the guard band widen).")
+print(
+    f"files: {len(files)} | label-free frames: {r_dark.size} "
+    f"({sel.mean()*100:.1f}% below thresh={a.thresh}) | "
+    f"labeled frames: {r_plasma.size}"
+)
+print(
+    f"label-free frames: p50 {np.percentile(r_dark,50)*100:.2f}%  "
+    f"p95 {np.percentile(r_dark,95)*100:.2f}% of shot max"
+)
+print(
+    f"labeled (plasma) frames: p5 {np.percentile(r_plasma,5)*100:.1f}%  "
+    f"p50 {np.percentile(r_plasma,50)*100:.1f}%"
+)
+print(
+    f"would-be-dark frames within 3 frames of a label: {boundary} "
+    f"(boundary risk; should be ~0)"
+)
+print(
+    "VERDICT: safe if labeled-p5 >> thresh and boundary ~ 0; if "
+    "label-free p95 crowds the threshold, dim beam-off phases exist "
+    "and the threshold must drop (or the guard band widen)."
+)

@@ -21,8 +21,10 @@ scripts/setup_env.sh --kernel          # installs pixi if needed, builds the env
 pixi run jupyter lab notebooks/demo.ipynb   # or open it in any JupyterLab with the kernel "cer-transfer (pixi)"
 ```
 In the notebook's first cell set `RELEASE` to the release URL; it downloads an
-inference checkpoint and one NSTX discharge and plots the reconstruction against
-the conventional fits. Training, evaluation and the figure pipeline additionally
+inference checkpoint and one NSTX discharge into `demo/` and plots the
+reconstruction against the conventional fits. On clusters whose compute nodes have
+no internet access, download the two release assets into `demo/` from a login node
+first (`curl -L -o demo/<name> <RELEASE>/<name>`); the notebook then uses them. Training, evaluation and the figure pipeline additionally
 need the data archive (`CER_DATA_ROOT`) and the split lists: see Installation and
 Running on another cluster.
 
@@ -37,7 +39,7 @@ eval_checkpoint.py   metrics and per-point prediction dumps
 cer_transfer/        package
   configs.py         machine definitions (chords, wavelength bins, data dirs) and model/training configs
   data.py            dataset over per-discharge joblib files
-  models.py          backbone (machine-specific stem + shared trunk) and heads
+  models.py          backbone (machine-specific stem + shared trunk) and heads; agnostic variant
   training.py        trainer, checkpoints, normalization
   losses.py, augment.py, dark.py, logging_utils.py
   beamstate.py       beam on/off detection from the spectra of both arrays
@@ -114,7 +116,9 @@ r.pred[chord, frame, k]   # k = 0: T_i (eV), 1: v_tor (km/s); r.pred_sigma, r.y,
 ```
 In JupyterLab choose the kernel "cer-transfer (pixi)" registered by
 `scripts/setup_env.sh --kernel`; it sets `CER_DATA_ROOT` for the kernel, which a
-portal-launched JupyterLab does not take from your shell profile.
+portal-launched JupyterLab does not take from your shell profile. The kernel starts with
+`pixi run --frozen`, so it never re-solves the environment on a compute node; after
+changing `pixi.toml`, run `pixi install` on a login node first.
 
 Checkpoints for sharing are exported without optimizer state (about 16 MB):
 `python -m cer_transfer.inference cer_ckpts/nstx_ft.pt nstx_ft_inference.pt`.
@@ -174,6 +178,9 @@ Job files are location-independent: all paths inside the repository (`cer_ckpts/
 `splits/`) are relative, and the jobs find the repository root whether submitted from
 it or from `slurm/`, and write their logs to `slurm/logs/<job-name>.out` / `.err`
 themselves, so the submission directory does not matter.
+Every job sources `.env` in the repository root (written by `scripts/setup_env.sh`,
+git-ignored) and stops with a clear message if `CER_DATA_ROOT` is not set, so the
+environment of the submitting shell does not matter.
 Fine-tuning and pre-training jobs continue from their checkpoint when requeued
 (`--resume` is added automatically if the output checkpoint exists). A run that
 finished (early stopping or epoch limit) is marked in its checkpoint and is not
@@ -193,6 +200,40 @@ resumed; `--force-resume` overrides that for a deliberate continuation. What has
 4. `scripts/setup_env.sh --data-root … --pixi-cache …` does the environment,
    the data-root check and the tests; on a GPU node `pixi run smoke` must report
    `torch.cuda.is_available() True`.
+
+## Zero-shot transfer (machine-agnostic model)
+
+`train.py --agnostic --resample-w 256` trains a variant in which no parameter
+depends on the number of chords: one light stem is shared by all chords (chords
+as batch), the trunk encodes the chord-averaged map, and one shared readout
+combines trunk and per-chord features. The wavelength axis is resampled to a
+common bin count. A model trained on one machine therefore applies to another
+without any target labels:
+```
+sbatch slurm/pretrain_agnostic_d3d.sbatch        # DIII-D, cer_ckpts/d3d_agnostic.pt
+sbatch slurm/eval_agnostic_nstx.sbatch           # zero-shot on NSTX val/test (--machine nstx)
+sbatch slurm/finetune_agnostic_nstx_r325.sbatch  # supervised comparison on 325 discharges
+```
+`eval_checkpoint.py --machine <name>` and `inference.load_model(..., machine=...)`
+accept the override for agnostic checkpoints only. `cer_transfer.analysis.affine_fit`
+reports, per target, the slope and offset between predictions and conventional fits
+and the R2 that remains after that affine correction, which separates a mere scale
+mismatch between spectrometers from a real transfer error. The per-chord stem makes
+activations scale with the chord count: use `--batch-size 8 --accumulation-steps 32`
+(about 24 GB) instead of batch 256.
+
+`cer_transfer.analysis.axis_sweep` (`slurm/axis_sweep.sbatch`) determines the target
+spectrometer's axis convention from the data: it evaluates the checkpoint with the
+wavelength axis reversed and stretched by a set of factors and reports the affine R2
+per setting; the maximizing flip/scale is the orientation and dispersion ratio between
+the two instruments, and the R2 left there is the transfer error that is not an axis
+convention. The determined convention is stored per machine (`MachineConfig.wavelength_flip`,
+`wavelength_scale`, relative to NSTX; DIII-D: flipped, 1.4) and applied automatically
+whenever the axis is resampled, so agnostic training and zero-shot evaluation see every
+machine in one convention; the default pipeline is unaffected. `eval_checkpoint.py
+--flip-w --w-scale <s>` adds a probe on top of the stored convention. `--y-max` in
+`affine_fit` and `axis_sweep` scores the overlapping label range only (e.g. Ti below
+the source training range).
 
 ## Conventions
 
@@ -214,4 +255,7 @@ Formatting follows scikit-learn's conventions: `black` and `isort` at 88 columns
 ## Tests
 
 `python -m tests.smoke` builds a synthetic discharge and runs every figure,
-beam-off and analysis module that does not need PyTorch.
+beam-off and analysis module that does not need PyTorch. `python -m tests.train_smoke`
+(needs PyTorch, CPU is enough) trains the default and the agnostic model for one epoch
+on synthetic DIII-D data, evaluates the agnostic one zero-shot on synthetic NSTX data
+and exercises the inference API.

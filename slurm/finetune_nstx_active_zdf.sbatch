@@ -26,6 +26,8 @@ cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from
 mkdir -p slurm/logs
 LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
 exec >>"$LOG.out" 2>>"$LOG.err"
+[ -f .env ] && source .env            # CER_DATA_ROOT etc., written by scripts/setup_env.sh
+: "${CER_DATA_ROOT:?CER_DATA_ROOT is not set: run scripts/setup_env.sh --data-root <dir> or export it}"
 trap 'echo "caught USR1, requeueing"; scontrol requeue $SLURM_JOB_ID' USR1
 
 # 48-chord ACTIVE lineage hop 1: D3D -> nstx_active. Reuses the EXISTING

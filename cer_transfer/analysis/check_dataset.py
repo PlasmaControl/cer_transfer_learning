@@ -13,6 +13,7 @@ Checks per file (cheap: mmap, no bulk reads except sampled stats):
 
 Exit code 0 = all files pass; 1 = any hard failure.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -22,12 +23,13 @@ from pathlib import Path
 import numpy as np
 from joblib import load
 
-from cer_transfer.configs import ModelConfig, get_machine, data_path
+from cer_transfer.configs import ModelConfig, data_path, get_machine
 
 REQUIRED_KEYS = ("input", "target", "target_error", "end_index")
 
 
 def check_file(fp: Path, machine, min_w: int, rng) -> tuple[list, dict]:
+    """Validate one discharge file; return (errors, statistics)."""
     errors, stats = [], {}
     d = load(data_path(fp), mmap_mode="r")
     for k in REQUIRED_KEYS:
@@ -43,11 +45,13 @@ def check_file(fp: Path, machine, min_w: int, rng) -> tuple[list, dict]:
     if C != machine.n_raw_channels:
         errors.append(f"input C={C}, config expects {machine.n_raw_channels}")
     if W < min_w:
-        errors.append(f"W={W} < minimum {min_w} "
-                      f"(hidden_dim * 2^pools for this machine)")
+        errors.append(
+            f"W={W} < minimum {min_w} " f"(hidden_dim * 2^pools for this machine)"
+        )
     if tgt.shape != (C, T, machine.n_targets):
-        errors.append(f"target shape {tgt.shape}, expected "
-                      f"{(C, T, machine.n_targets)}")
+        errors.append(
+            f"target shape {tgt.shape}, expected " f"{(C, T, machine.n_targets)}"
+        )
     if err.shape != tgt.shape:
         errors.append(f"target_error shape {err.shape} != target {tgt.shape}")
     if end > 0:
@@ -69,17 +73,23 @@ def check_file(fp: Path, machine, min_w: int, rng) -> tuple[list, dict]:
     if (spec < 0).any():
         errors.append("negative photon counts in sampled spectra")
 
-    tgt_v = np.asarray(tgt[:, :end, :], dtype=np.float64) \
-        * np.asarray(machine.target_scale, dtype=np.float64)  # canonical
+    tgt_v = np.asarray(tgt[:, :end, :], dtype=np.float64) * np.asarray(
+        machine.target_scale, dtype=np.float64
+    )  # canonical
     nan_frac = float(np.isnan(tgt_v).mean())
     stats.update(
-        W=W, T=T, end_index=end, nan_frac=nan_frac,
+        W=W,
+        T=T,
+        end_index=end,
+        nan_frac=nan_frac,
         spec_median=float(np.median(spec)),
         spec_max=float(spec.max()),
-        ti_median=float(np.nanmedian(tgt_v[..., 0]))
-        if nan_frac < 1.0 else float("nan"),
-        vtor_median=float(np.nanmedian(tgt_v[..., 1]))
-        if nan_frac < 1.0 else float("nan"),
+        ti_median=(
+            float(np.nanmedian(tgt_v[..., 0])) if nan_frac < 1.0 else float("nan")
+        ),
+        vtor_median=(
+            float(np.nanmedian(tgt_v[..., 1])) if nan_frac < 1.0 else float("nan")
+        ),
     )
     if nan_frac == 1.0:
         stats["unlabeled"] = True
@@ -87,6 +97,7 @@ def check_file(fp: Path, machine, min_w: int, rng) -> tuple[list, dict]:
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--machine", required=True)
     p.add_argument("--dir", type=Path, required=True)
@@ -96,18 +107,22 @@ def main():
     args = p.parse_args()
 
     machine = get_machine(args.machine)
-    cfg = ModelConfig(hidden_dim=args.hidden_dim,
-                      trunk_w_pools=args.trunk_w_pools, feature_width=128)
+    cfg = ModelConfig(
+        hidden_dim=args.hidden_dim, trunk_w_pools=args.trunk_w_pools, feature_width=128
+    )
     n_pools = machine.stem_w_pools + cfg.trunk_w_pools
     min_w = args.hidden_dim << n_pools
-    print(f"machine={machine.name}: C={machine.n_raw_channels}, "
-          f"pools={n_pools} -> min W={min_w}\n")
+    print(
+        f"machine={machine.name}: C={machine.n_raw_channels}, "
+        f"pools={n_pools} -> min W={min_w}\n"
+    )
 
     files = sorted(args.dir.glob("*.joblib"))
     if args.limit:
         files = files[: args.limit]
     if not files:
-        print("no .joblib files found"); sys.exit(1)
+        print("no .joblib files found")
+        sys.exit(1)
 
     rng = np.random.default_rng(0)
     n_bad, agg = 0, []
@@ -120,24 +135,42 @@ def main():
             n_bad += 1
             print(f"FAIL {fp.name}: " + "; ".join(errors))
         elif stats.get("unlabeled"):
-            print(f"UNLABELED {fp.name}: all targets NaN "
-                  "(format-valid; belongs in the SSL pool, not a labeled dir)")
+            print(
+                f"UNLABELED {fp.name}: all targets NaN "
+                "(format-valid; belongs in the SSL pool, not a labeled dir)"
+            )
         if stats:
             agg.append(stats)
         if (i + 1) % 500 == 0:
             print(f"... {i + 1}/{len(files)} checked ({n_bad} failures)")
 
     if agg:
+
         def q(key):
-            v = np.array([a[key] for a in agg if key in a and
-                          np.isfinite(a.get(key, np.nan))])
-            return (f"median {np.median(v):.4g}, "
-                    f"range [{v.min():.4g}, {v.max():.4g}]") if len(v) else "-"
+            """Quantile helper over the pooled statistics."""
+            v = np.array(
+                [a[key] for a in agg if key in a and np.isfinite(a.get(key, np.nan))]
+            )
+            return (
+                (f"median {np.median(v):.4g}, " f"range [{v.min():.4g}, {v.max():.4g}]")
+                if len(v)
+                else "-"
+            )
+
         n_unlab = sum(1 for a in agg if a.get("unlabeled"))
-        print(f"\nsummary over {len(agg)} readable files "
-              f"({n_unlab} fully unlabeled):")
-        for key in ("W", "T", "end_index", "nan_frac", "spec_median",
-                    "spec_max", "ti_median", "vtor_median"):
+        print(
+            f"\nsummary over {len(agg)} readable files " f"({n_unlab} fully unlabeled):"
+        )
+        for key in (
+            "W",
+            "T",
+            "end_index",
+            "nan_frac",
+            "spec_median",
+            "spec_max",
+            "ti_median",
+            "vtor_median",
+        ):
             print(f"  {key:12s} {q(key)}")
 
     print(f"\n{len(files) - n_bad}/{len(files)} files OK")

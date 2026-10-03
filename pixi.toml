@@ -34,3 +34,4 @@ smoke = "python -c 'import torch, ray, numpy, joblib; print(torch.__version__, t
 eval = "python -u eval_checkpoint.py"
 figs = "bash scripts/make_figs.sh"
 test = "python -m tests.smoke"
+test-train = "python -m tests.train_smoke"   # needs torch; CPU, ~2 min

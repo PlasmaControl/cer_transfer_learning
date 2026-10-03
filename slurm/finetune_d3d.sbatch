@@ -21,6 +21,8 @@ cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from
 mkdir -p slurm/logs
 LOG="slurm/logs/${SLURM_JOB_NAME}${SLURM_ARRAY_TASK_ID:+_$SLURM_ARRAY_TASK_ID}"
 exec >>"$LOG.out" 2>>"$LOG.err"
+[ -f .env ] && source .env            # CER_DATA_ROOT etc., written by scripts/setup_env.sh
+: "${CER_DATA_ROOT:?CER_DATA_ROOT is not set: run scripts/setup_env.sh --data-root <dir> or export it}"
 
 # Reverse hop: NSTX -> D3D. Source = NSTX from-scratch model (stem/trunk
 # arch, feature_width 128, GroupNorm, mlp head). Trunk + head trunk

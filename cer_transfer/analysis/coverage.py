@@ -15,6 +15,7 @@ unlabeled pre-trigger frames, so runs break at discharge boundaries.
     pixi run python -u -m cer_transfer.analysis.coverage --preds gallery/ft_TEST.npz \
         --k 0.992 1.171
 """
+
 import argparse
 
 import numpy as np
@@ -33,8 +34,8 @@ def consistent_mask(y):
         brk = gaps > 1.5 * med
         edge = np.zeros(idx.size, bool)
         edge[0] = edge[-1] = True
-        edge[1:][brk] = True      # first label after a break
-        edge[:-1][brk] = True     # last label before a break
+        edge[1:][brk] = True  # first label after a break
+        edge[:-1][brk] = True  # last label before a break
         # spikes: interior labels with equally spaced neighbours
         spike = np.zeros(idx.size, bool)
         eq = np.zeros(idx.size, bool)
@@ -52,10 +53,16 @@ def consistent_mask(y):
 
 
 def main():
+    """Command-line entry point."""
     p = argparse.ArgumentParser()
     p.add_argument("--preds", required=True)
-    p.add_argument("--k", type=float, nargs=2, default=[1.0, 1.0],
-                   help="calibration factors k for Ti and vtor")
+    p.add_argument(
+        "--k",
+        type=float,
+        nargs=2,
+        default=[1.0, 1.0],
+        help="calibration factors k for Ti and vtor",
+    )
     args = p.parse_args()
     d = np.load(args.preds)
     ch = d["chord"]
@@ -71,8 +78,10 @@ def main():
         lab = np.isfinite(y[..., t]) & np.isfinite(mu[..., t])
         cons = consistent_mask(y[..., t]) & lab
         frac = cons.sum() / max(lab.sum(), 1)
-        print(f"{name}: {lab.sum()} labeled points, consistent "
-              f"{100 * frac:.1f}% (manuscript: 83.1%)")
+        print(
+            f"{name}: {lab.sum()} labeled points, consistent "
+            f"{100 * frac:.1f}% (manuscript: 83.1%)"
+        )
         for kname, k in (("raw", 1.0), ("calibrated", args.k[t])):
             s = np.sqrt((k * sm[..., t]) ** 2 + np.nan_to_num(sl[..., t]) ** 2)
             z = np.abs(y[..., t] - mu[..., t]) / s
@@ -81,16 +90,21 @@ def main():
                 c1 = 100 * np.mean(zz < 1)
                 c2 = 100 * np.mean(zz < 2)
                 rows.append((name, kname, sub, c1, c2, np.median(zz)))
-    print(f"\n{'target':6s} {'':11s} {'labels':11s} {'1sigma':>7s} "
-          f"{'2sigma':>7s} {'median|z|':>9s}   (Gaussian: 68.3 / 95.4 / 0.674)")
+    print(
+        f"\n{'target':6s} {'':11s} {'labels':11s} {'1sigma':>7s} "
+        f"{'2sigma':>7s} {'median|z|':>9s}   (Gaussian: 68.3 / 95.4 / 0.674)"
+    )
     for r in rows:
-        print(f"{r[0]:6s} {r[1]:11s} {r[2]:11s} {r[3]:6.1f}% {r[4]:6.1f}% "
-              f"{r[5]:9.3f}")
+        print(
+            f"{r[0]:6s} {r[1]:11s} {r[2]:11s} {r[3]:6.1f}% {r[4]:6.1f}% " f"{r[5]:9.3f}"
+        )
     print("\nLaTeX rows (target & calibration & labels & 1sigma & 2sigma):")
     for r in rows:
         tt = "$T_\\mathrm{i}$" if r[0] == "Ti" else "$v_\\mathrm{tor}$"
-        print(f"{tt} & {r[1]} & {r[2]} & \\SI{{{r[3]:.1f}}}{{\\percent}} & "
-              f"\\SI{{{r[4]:.1f}}}{{\\percent}} \\\\")
+        print(
+            f"{tt} & {r[1]} & {r[2]} & \\SI{{{r[3]:.1f}}}{{\\percent}} & "
+            f"\\SI{{{r[4]:.1f}}}{{\\percent}} \\\\"
+        )
 
 
 if __name__ == "__main__":
