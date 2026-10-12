@@ -26,7 +26,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from cer_transfer.configs import ModelConfig, get_machine
+from cer_transfer.configs import ModelConfig, data_path, get_machine
 from cer_transfer.data import ShotDataset
 from cer_transfer.models import build_model
 from cer_transfer.training import denormalize_mu_sigma, load_checkpoint
@@ -62,9 +62,9 @@ def main():
     model.load_state_dict(ckpt["model_state"])
     stats = {k: v.to(args.device) for k, v in ckpt["norm_stats"].items()}
     files = [
-        Path(l)
+        data_path(l.strip())  # relative entries resolve against CER_DATA_ROOT
         for l in args.list.read_text().splitlines()
-        if l.strip().endswith(".joblib")
+        if l.strip().endswith(".joblib") and not l.strip().startswith("#")
     ]
     if args.limit:
         files = files[: args.limit]

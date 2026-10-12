@@ -88,6 +88,22 @@ def main():
     p.add_argument("--target", choices=("ti", "vtor"), default="vtor")
     p.add_argument("--t-offset", type=float, default=-0.235)
     p.add_argument("--margin", type=float, default=0.06)
+    p.add_argument(
+        "--margin-before",
+        type=float,
+        nargs="+",
+        default=None,
+        help="time shown before the beam-off phase (s), one value per panel "
+        "(default: --margin)",
+    )
+    p.add_argument(
+        "--margin-after",
+        type=float,
+        nargs="+",
+        default=None,
+        help="time shown after the beam-off phase (s), one value per panel "
+        "(default: --margin)",
+    )
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", type=str, default="beamoff_grid")
     args = p.parse_args()
@@ -157,7 +173,7 @@ def main():
             fig, axes = plt.subplots(nrow, ncol, figsize=size, squeeze=False)
             for ax in axes.ravel()[n:]:
                 ax.set_visible(False)
-            for ax, s in zip(axes.ravel(), chosen):
+            for i_pan, (ax, s) in enumerate(zip(axes.ravel(), chosen)):
                 fz = files_for(s)
                 if fz is None:
                     ax.set_title(f"{s}: files missing", fontsize="small")
@@ -190,8 +206,13 @@ def main():
                     continue
                 a, b = max(spans, key=lambda ab: ab[1] - ab[0])
                 t = np.arange(T) / FS + args.t_offset
-                m = int(round(args.margin * FS))
-                f0, f1 = max(a - m, 0), min(b + m, T - 1)
+                # per-panel margins before/after the beam-off phase (s); the
+                # last given value applies to all further panels
+                mb = args.margin_before or [args.margin]
+                ma = args.margin_after or [args.margin]
+                m0 = int(round(mb[min(i_pan, len(mb) - 1)] * FS))
+                m1 = int(round(ma[min(i_pan, len(ma) - 1)] * FS))
+                f0, f1 = max(a - m0, 0), min(b + m1, T - 1)
                 w = np.arange(f0, f1 + 1)
                 ax.axvspan(
                     t[a] - 0.5 / FS, t[b] + 0.5 / FS, color="0.88", zorder=0, lw=0

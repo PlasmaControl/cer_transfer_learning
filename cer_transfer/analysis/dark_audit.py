@@ -20,7 +20,7 @@ p.add_argument("--sample", type=int, default=200)
 p.add_argument("--thresh", type=float, default=0.05)
 a = p.parse_args()
 
-files = [Path(l) for l in a.list.read_text().splitlines() if l.strip()]
+files = [data_path(l.strip()) for l in a.list.read_text().splitlines() if l.strip()]
 rng = np.random.default_rng(0)
 files = [files[i] for i in rng.permutation(len(files))[: a.sample]]
 

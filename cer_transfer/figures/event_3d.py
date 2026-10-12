@@ -50,6 +50,13 @@ def main():
     )
     p.add_argument("--no-fits", action="store_true")
     p.add_argument(
+        "--band-alpha",
+        type=float,
+        default=0.30,
+        help="opacity of the uncertainty band on measured chords (lower = more "
+        "transparent; unmeasured chords get a fifth of it)",
+    )
+    p.add_argument(
         "--min-fit-frac",
         type=float,
         default=0.5,
@@ -178,7 +185,8 @@ def main():
             if ps is not None:
                 lo_b = np.clip(z - s_, zb, zmax)
                 hi_b = np.clip(z + s_, zb, zmax)
-                for mask, alpha in ((meas, 0.30), (~meas, 0.06)):
+                a_in = args.band_alpha  # chords with fits / outside them
+                for mask, alpha in ((meas, a_in), (~meas, a_in * 0.2)):
                     # contiguous runs, extended by one point so runs connect
                     run_m = mask | np.r_[mask[1:], False] | np.r_[False, mask[:-1]]
                     idx = np.where(run_m)[0]
@@ -250,7 +258,7 @@ def main():
         hh = [Line2D([], [], color="C0", lw=1.2)]
         ll = [f"model, every {1000 * max(args.stride, 1) / FS:.0f} ms"]
         if ps is not None:
-            hh.append(Patch(color="C0", alpha=0.35))
+            hh.append(Patch(color="C0", alpha=min(1.0, args.band_alpha * 1.15)))
             ll.append("model uncertainty")
         if not args.no_fits:
             hh.append(Line2D([], [], color="k", marker="o", ls="", ms=3))

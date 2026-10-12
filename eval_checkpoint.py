@@ -46,6 +46,12 @@ def main():
         help="reverse the wavelength axis (zero-shot probe)",
     )
     p.add_argument(
+        "--w-shift",
+        type=float,
+        default=0.0,
+        help="shift the resampled wavelength axis by this many bins (probe)",
+    )
+    p.add_argument(
         "--w-scale",
         type=float,
         default=1.0,
@@ -149,6 +155,7 @@ def main():
         resample_w=cfg.resample_w,
         w_scale=args.w_scale,
         flip_w=args.flip_w,
+        w_shift=args.w_shift,
     )
 
     n_t = len(machine.targets)

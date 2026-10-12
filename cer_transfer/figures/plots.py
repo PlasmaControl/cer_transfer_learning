@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from cer_transfer.figures.paperfig import PAPER_W, bbox
 from joblib import load
 
 from cer_transfer.configs import data_path, get_machine
@@ -35,14 +36,15 @@ def _render(build_fig, out: Path, name: str):
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             fig = build_fig(ctx)
-            fig.savefig(out / f"{name}.{ext}", dpi=300, bbox_inches="tight")
+            fig.tight_layout()
+            fig.savefig(out / f"{name}.{ext}", dpi=300, bbox_inches=bbox(ext))
             plt.close(fig)
     print(f"wrote {out / name}.png/.pdf")
 
 
 def _read_files(args, machine):
     files = [
-        Path(ln.strip())
+        data_path(ln.strip())
         for ln in args.list.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
@@ -173,7 +175,7 @@ def cmd_recon(args):
     stats = {k: v.to(device) for k, v in ckpt["norm_stats"].items()}
 
     files = [
-        Path(ln.strip())
+        data_path(ln.strip())
         for ln in args.list.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
@@ -251,16 +253,18 @@ def cmd_recon(args):
 def cmd_curves(args):
     """Subcommand: training curves from metrics CSVs."""
     runs = []
-    for path in args.csv:
+    labels = args.labels or []
+    for i, path in enumerate(args.csv):
         df = pd.read_csv(path)
         if args.metric not in df.columns:
             print(f"skip {path}: no column {args.metric}")
             continue
-        runs.append((Path(path).stem.replace(".metrics", ""), df))
+        label = labels[i] if i < len(labels) else Path(path).stem.replace(".metrics", "")
+        runs.append((label, df))
 
     def build(ctx):
         """Draw the figure for the current plotting context."""
-        size = (5.5, 3.4) if ctx == "paper" else (9, 5.5)
+        size = (PAPER_W, 3.2) if ctx == "paper" else (9, 5.5)
         fig, ax = plt.subplots(figsize=size)
         for i, (label, df) in enumerate(runs):
             if args.x == "hours" and "epoch_seconds" in df.columns:
@@ -269,15 +273,35 @@ def cmd_curves(args):
             else:
                 x = np.arange(len(df))
                 ax.set_xlabel("Epoch")
-            ax.plot(
-                x, df[args.metric].astype(float), lw=1.4, color=f"C{i}", label=label
-            )
+            v = df[args.metric].astype(float).to_numpy()
+            if args.drop_outliers:
+                # epochs whose score falls more than --outlier-drop below the running
+                # best of the preceding epochs AND below the median of a wide window are
+                # collapsed epochs (resume after a SLURM requeue, bad batch): replaced by
+                # linear interpolation between the neighbouring valid epochs, and reported
+                vs = pd.Series(v)
+                med = vs.rolling(9, center=True, min_periods=3).median().to_numpy()
+                run_best = vs.cummax().shift(1).fillna(vs.iloc[0]).to_numpy()
+                late = np.arange(v.size) >= 10  # early epochs climb from scratch; no "best so far" there
+                bad = (v < med - args.outlier_drop) | ((v < run_best - 1.5 * args.outlier_drop) & late)
+                if bad.any():
+                    print(f"{label}: interpolated over collapsed epochs "
+                          + ", ".join(f"{e} ({v[e]:.3f})" for e in np.where(bad)[0]))
+                v = pd.Series(np.where(bad, np.nan, v)).interpolate(limit_area="inside").to_numpy()
+            ax.plot(x, v, lw=1.4, color=f"C{i}", label=label)
+            if args.mark_best:
+                j = int(np.nanargmax(v))
+                ax.plot([np.asarray(x)[j]], [v[j]], "o", color=f"C{i}", ms=5)
+                ax.annotate(f"{v[j]:.3f}", (np.asarray(x)[j], v[j]), xytext=(4, -10),
+                            textcoords="offset points", fontsize="x-small", color=f"C{i}")
         ax.set_ylabel("Validation score" if args.metric == "val_score" else args.metric)
+        if args.ylim:
+            ax.set_ylim(*args.ylim)
         ax.legend()
         fig.tight_layout()
         return fig
 
-    _render(build, args.out, f"learning_curves_{args.metric}")
+    _render(build, args.out, args.out_name or f"learning_curves_{args.metric}")
 
 
 def cmd_scaling(args):
@@ -292,14 +316,37 @@ def cmd_scaling(args):
     scr = [
         (int(s.split(":")[0]), best(s.split(":", 1)[1])) for s in (args.scratch or [])
     ]
+    agn = sorted(
+        (int(s.split(":")[0]), best(s.split(":", 1)[1]))
+        for s in (getattr(args, "agnostic_runs", None) or [])
+    )
+    agn_scr = [
+        (int(s.split(":")[0]), best(s.split(":", 1)[1]))
+        for s in (getattr(args, "agnostic_scratch", None) or [])
+    ]
+    zero = None
+    if getattr(args, "zero_shot_csv", None):
+        z = pd.read_csv(args.zero_shot_csv)
+        # same definition as the training's val_score: mean of the per-target R2;
+        # the column selects raw R2 or the label-free protocol R2 (physics_correction --csv)
+        col = getattr(args, "zero_shot_column", "r2_raw")
+        zero = float(z[col].mean())
 
     def build(ctx):
         """Draw the figure for the current plotting context."""
-        size = (5.5, 3.4) if ctx == "paper" else (9, 5.5)
+        size = (PAPER_W, 3.2) if ctx == "paper" else (9, 5.5)
         fig, ax = plt.subplots(figsize=size)
-        xs = [n for n, _ in runs]
-        ys = [v for _, v in runs]
-        ax.plot(xs, ys, "o-", color="C0", lw=1.8, label="fine-tuned from DIII-D model")
+        xs = sorted(
+            {n for n, _ in runs} | {n for n, _ in agn} | {n for n, _ in agn_scr}
+        )
+        ax.plot(
+            [n for n, _ in runs],
+            [v for _, v in runs],
+            "o-",
+            color="C0",
+            lw=1.8,
+            label=getattr(args, "runs_label", None) or "DIII-D+NSTX model",
+        )
         for i, (n, v) in enumerate(scr):
             ax.plot(
                 [n],
@@ -308,8 +355,41 @@ def cmd_scaling(args):
                 mfc="none",
                 color="C3",
                 ms=8,
-                label="trained from scratch" if i == 0 else None,
+                label=(getattr(args, "scratch_label", None) or "NSTX model") if i == 0 else None,
             )
+        if agn:
+            ax.plot(
+                [n for n, _ in agn],
+                [v for _, v in agn],
+                "o--",
+                color="C2",
+                lw=1.6,
+                label=args.agnostic_label,
+            )
+        for i, (n, v) in enumerate(agn_scr):
+            ax.plot(
+                [n],
+                [v],
+                "D",
+                mfc="none",
+                color="C2",
+                ms=7,
+                label="machine-agnostic, trained from scratch" if i == 0 else None,
+            )
+        if zero is not None:
+            ax.axhline(
+                zero,
+                color="C2",
+                ls="-.",
+                lw=1.4,
+                label=getattr(args, "zero_shot_label", None) or "DIII-D model",
+            )
+            if runs:
+                ref = runs[-1][1]
+                print(
+                    f"zero-shot score {zero:.3f} = {100 * zero / ref:.0f} % of the "
+                    f"full-data fine-tuned score {ref:.3f}"
+                )
         if args.annotate and runs and scr:
             x0, y0 = runs[0]
             xF, yF = runs[-1]
@@ -323,10 +403,11 @@ def cmd_scaling(args):
                 color="C0",
                 arrowprops=dict(arrowstyle="->", color="C0", lw=1.0),
             )
-            # annotation 2: equivalence point vs the full from-scratch model
-            ax.axhline(s_full, color="C3", ls=":", lw=1.0, alpha=0.8)
+            # annotation 2 (optional): equivalence point vs the full from-scratch model
+            if getattr(args, "annotate_match", False):
+                ax.axhline(s_full, color="C3", ls=":", lw=1.0, alpha=0.8)
             eq = next((n for n, v in runs if v >= s_full), None)
-            if eq is not None:
+            if eq is not None and getattr(args, "annotate_match", False):
                 ax.annotate(
                     f"{eq} shots match\nfrom-scratch on all "
                     f"{scr[0][0] if len(scr)==1 else max(n for n,_ in scr)}",
@@ -352,7 +433,7 @@ def cmd_scaling(args):
         ax.minorticks_off()
         ax.tick_params(axis="x", rotation=30)
         ax.set_xlabel("Number of NSTX shots")
-        ax.set_ylabel("Validation score")
+        ax.set_ylabel(getattr(args, "ylabel", None) or "NSTX validation score")
         if args.sizes_csv is not None:
             szd = pd.read_csv(args.sizes_csv)
             m = szd["list"].str.match(r"nstx_train(_r\d+)?\.txt$")
@@ -390,7 +471,7 @@ def cmd_sizes(args):
 
     def build(ctx):
         """Draw the figure for the current plotting context."""
-        size = (5.5, 3.4) if ctx == "paper" else (9, 5.5)
+        size = (PAPER_W, 3.2) if ctx == "paper" else (9, 5.5)
         fig, ax = plt.subplots(figsize=size)
         ax.plot(d["shots"], d["frames"], "o-", color="C0", lw=1.8)
         ax.set_xscale("log")
@@ -580,10 +661,59 @@ def main():
     c.add_argument("--csv", nargs="+", required=True)
     c.add_argument("--metric", default="val_score")
     c.add_argument("--x", choices=["epoch", "hours"], default="epoch")
+    c.add_argument("--labels", nargs="*", default=None, help="legend text per CSV (same order)")
+    c.add_argument("--mark-best", action="store_true", help="mark the best epoch of each curve")
+    c.add_argument("--drop-outliers", action="store_true",
+                   help="interpolate linearly over epochs whose score collapses (resume dips)")
+    c.add_argument("--outlier-drop", type=float, default=0.03,
+                   help="drop below the 9-epoch rolling median that marks a collapsed epoch (default 0.03)")
+    c.add_argument("--ylim", type=float, nargs=2, default=None)
+    c.add_argument("--out-name", default=None, help="file stem (default learning_curves_<metric>)")
     c.add_argument("--out", type=Path, default=Path("figs"))
     c.set_defaults(fn=cmd_curves)
 
     s = sub.add_parser("scaling", help="best val_score vs training shots")
+    s.add_argument(
+        "--agnostic-runs",
+        nargs="*",
+        default=None,
+        help="N:metrics.csv of the machine-agnostic model fine-tuned on N discharges",
+    )
+    s.add_argument(
+        "--annotate-match",
+        action="store_true",
+        help="with --annotate: also mark the from-scratch full-data score (dotted line) "
+        "and the smallest fine-tuned subset that reaches it",
+    )
+    s.add_argument(
+        "--agnostic-scratch",
+        nargs="*",
+        default=None,
+        help="N:metrics.csv of the machine-agnostic model trained from scratch on N discharges",
+    )
+    s.add_argument(
+        "--agnostic-label",
+        default="machine-agnostic, trained from scratch",
+        help="legend label of the --agnostic-runs curve",
+    )
+    s.add_argument(
+        "--zero-shot-csv",
+        type=Path,
+        default=None,
+        help="affine_fit CSV of the machine-agnostic model on the NSTX validation "
+        "set without NSTX training (score = mean of the raw per-target R2)",
+    )
+    s.add_argument(
+        "--zero-shot-column",
+        default="r2_raw",
+        help="column of --zero-shot-csv to average: r2_raw, or r2_protocol from "
+        "cer_transfer.analysis.physics_correction --csv (label-free metadata correction)",
+    )
+    s.add_argument("--zero-shot-label", default=None,
+                   help="legend text for the zero-shot line (default: 'DIII-D only')")
+    s.add_argument("--runs-label", default=None, help="legend text of --runs (default 'DIII-D+NSTX (fine-tuned)')")
+    s.add_argument("--scratch-label", default=None, help="legend text of --scratch (default 'NSTX only')")
+    s.add_argument("--ylabel", default=None, help="y-axis label (default 'NSTX validation score')")
     s.add_argument(
         "--annotate",
         action="store_true",

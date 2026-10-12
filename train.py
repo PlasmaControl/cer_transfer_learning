@@ -79,6 +79,8 @@ def make_loaders(
     tail_oversample: float = 0.0,
     zero_dark_frames: bool = False,
     resample_w=None,
+    mirror_p: float = 0.0,
+    stretch_aug=None,
 ):
     """Build train/val DataLoaders from lists or directories for a machine."""
     train_files = resolve_files(train_dir, train_list, machine.train_dir, "train")
@@ -91,6 +93,8 @@ def make_loaders(
         max_label_relerr=getattr(train_cfg, "max_label_relerr", 0.0),
         zero_dark_frames=zero_dark_frames,
         resample_w=resample_w,
+        mirror_p=mirror_p,
+        stretch_aug=stretch_aug,
     )
     val_set = ShotDataset(
         val_files, machine, subseq_len=-1, mmap=mmap, resample_w=resample_w
@@ -222,6 +226,56 @@ def main():
         help="agnostic mode: attention over chords (per frame) before the readout",
     )
     p.add_argument(
+        "--randconv",
+        choices=("randconv", "instrument"),
+        default=None,
+        help="random convolutions along wavelength during training (RandConv, "
+        "Xu et al. ICLR 2021): Kaiming-normal kernels, or random Gaussian "
+        "instrument kernels",
+    )
+    p.add_argument("--randconv-kernels", type=int, nargs="+", default=[1, 3, 5, 7])
+    p.add_argument(
+        "--randconv-no-mixing",
+        action="store_true",
+        help="no blending with the input (RandConv mixing is on by default)",
+    )
+    p.add_argument("--randconv-identity-prob", type=float, default=0.0)
+    p.add_argument(
+        "--randconv-max-shift",
+        type=int,
+        default=0,
+        help="also shift spectra by up to this many bins (labels unchanged)",
+    )
+    p.add_argument(
+        "--consistency-w",
+        type=float,
+        default=0.0,
+        help="weight of the RandConv consistency loss (two extra random views)",
+    )
+    p.add_argument(
+        "--chord-attention-depth",
+        type=int,
+        default=0,
+        help="with --chord-attention: number of LaBraM transformer blocks (0: one "
+        "attention layer)",
+    )
+    p.add_argument(
+        "--stretch-augment",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("LO", "HI"),
+        help="label-consistent stretch augmentation: stretch spectra about the rest "
+        "pixel by a ~ log-uniform(LO, HI), v_tor x a, T_i x a^2 (agnostic pipeline)",
+    )
+    p.add_argument(
+        "--mirror-augment",
+        type=float,
+        default=0.0,
+        help="probability of mirroring a training sample about the machine's rest "
+        "pixel with v_tor negated (agnostic pipeline)",
+    )
+    p.add_argument(
         "--resample-w",
         type=int,
         default=None,
@@ -291,6 +345,7 @@ def main():
         moment_features=args.moment_features,
         agnostic=args.agnostic,
         chord_attention=args.chord_attention,
+        chord_attention_depth=args.chord_attention_depth,
         resample_w=args.resample_w,
     )
 
@@ -347,6 +402,12 @@ def main():
         subseq_len=args.subseq_len,
         profile=args.profile,
         augment=args.augment,
+        randconv=args.randconv,
+        randconv_kernels=tuple(args.randconv_kernels),
+        randconv_mixing=not args.randconv_no_mixing,
+        randconv_identity_prob=args.randconv_identity_prob,
+        randconv_max_shift=args.randconv_max_shift,
+        consistency_w=args.consistency_w,
         wavelength_mask_param=args.wavelength_mask,
         time_mask_param=args.time_mask,
     )
@@ -392,6 +453,8 @@ def main():
         tail_oversample=args.tail_oversample,
         zero_dark_frames=args.zero_dark_frames,
         resample_w=model_cfg.resample_w,
+        mirror_p=args.mirror_augment,
+        stretch_aug=args.stretch_augment,
     )
 
     loggers = [CSVLogger(args.checkpoint.with_suffix(".metrics.csv"))]

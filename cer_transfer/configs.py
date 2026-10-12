@@ -11,6 +11,7 @@ should need to change.
 from __future__ import annotations
 
 import os
+import dataclasses
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,6 +126,12 @@ class MachineConfig:
     # calibration when available.
     wavelength_flip: bool = False
     wavelength_scale: float = 1.0
+    # shift (resampled bins) applied after flip/stretch so that the unshifted
+    # line sits at the same pixel as on the NSTX reference
+    wavelength_shift: float = 0.0
+    # pixel of the unshifted line in the resampled input (stored convention),
+    # i.e. zero rotation; centre of the mirror augmentation
+    rest_pixel: Optional[float] = None
     train_dir: Optional[Path] = None
     val_dir: Optional[Path] = None
 
@@ -195,6 +202,9 @@ class ModelConfig:
     # based, permutation-invariant, no positional information
     chord_attention: bool = False
     chord_attention_heads: int = 4
+    # >0: replace the single attention layer by this many LaBraM transformer
+    # blocks (pre-norm attention + MLP, layer scale, q/k normalization)
+    chord_attention_depth: int = 0
     # Resample the wavelength axis to this many bins in preprocessing (plain
     # interpolation), so spectrometers with different resolution share a
     # pixel scale. None keeps the native axis.
@@ -252,6 +262,13 @@ class TrainConfig:
     num_workers: int = 8
     profile: bool = False  # per-batch phase timing to stdout
     augment: bool = False  # SpecAugment on training batches
+    # RandConv-style random convolutions along wavelength (cer_transfer.randconv)
+    randconv: Optional[str] = None  # None | "randconv" | "instrument"
+    randconv_kernels: tuple = (1, 3, 5, 7)
+    randconv_mixing: bool = True
+    randconv_identity_prob: float = 0.0
+    randconv_max_shift: int = 0
+    consistency_w: float = 0.0  # weight of the consistency loss (two extra views)
     wavelength_mask_param: int = 200  # max masked span along W
     time_mask_param: int = 120  # max masked span along T
 
@@ -327,11 +344,14 @@ D3D_FULL = register(
         chord_indices=None,
         stem_w_pools=2,  # ~400-600 bins -> ~100-150 at trunk entry
         train_dir=Path("training_set_30"),  # relative to CER_DATA_ROOT
-        # axis sweep of the NSTX model on DIII-D (tangential, 100 shots): the
-        # vtor slope is positive only with the axis reversed and the affine
-        # R2 peaks at a stretch of 1.4 -> DIII-D convention relative to NSTX
+        # DIII-D convention relative to NSTX from the model-based axis sweep
+        # (NSTX model on 100 DIII-D tangential discharges): orientation
+        # reversed, calibrated vtor R2 peaks at a stretch of 1.4. (A
+        # moment-based estimate, 1.20 with a shift, was tested and is worse:
+        # NSTX line moments are biased by passive emission.)
         wavelength_flip=True,
         wavelength_scale=1.4,
+        rest_pixel=133.0,  # shift_response: 131-136 on all tangential chords
         val_dir=Path("test_set_30"),
     )
 )
@@ -343,11 +363,14 @@ D3D_SUBSET = register(
         input_channel_indices=tuple(range(0, 80, 5)),
         chord_indices=(0, 1, 2, 3, 4, 5, 6, 16, 17, 18, 19, 20, 21, 32, 33, 34, 35),
         train_dir=Path("training_set_30"),  # relative to CER_DATA_ROOT
-        # axis sweep of the NSTX model on DIII-D (tangential, 100 shots): the
-        # vtor slope is positive only with the axis reversed and the affine
-        # R2 peaks at a stretch of 1.4 -> DIII-D convention relative to NSTX
+        # DIII-D convention relative to NSTX from the model-based axis sweep
+        # (NSTX model on 100 DIII-D tangential discharges): orientation
+        # reversed, calibrated vtor R2 peaks at a stretch of 1.4. (A
+        # moment-based estimate, 1.20 with a shift, was tested and is worse:
+        # NSTX line moments are biased by passive emission.)
         wavelength_flip=True,
         wavelength_scale=1.4,
+        rest_pixel=133.0,  # shift_response: 131-136 on all tangential chords
         val_dir=Path("test_set_30"),
     )
 )
@@ -363,11 +386,73 @@ D3D_TANGENTIAL = register(
         chord_indices=tuple(range(48)),
         stem_w_pools=2,
         train_dir=Path("training_set_30"),  # relative to CER_DATA_ROOT
-        # axis sweep of the NSTX model on DIII-D (tangential, 100 shots): the
-        # vtor slope is positive only with the axis reversed and the affine
-        # R2 peaks at a stretch of 1.4 -> DIII-D convention relative to NSTX
+        # DIII-D convention relative to NSTX from the model-based axis sweep
+        # (NSTX model on 100 DIII-D tangential discharges): orientation
+        # reversed, calibrated vtor R2 peaks at a stretch of 1.4. (A
+        # moment-based estimate, 1.20 with a shift, was tested and is worse:
+        # NSTX line moments are biased by passive emission.)
         wavelength_flip=True,
         wavelength_scale=1.4,
+        rest_pixel=133.0,  # shift_response: 131-136 on all tangential chords
+        val_dir=Path("test_set_30"),
+    )
+)
+
+# Tangential DIII-D with the wavelength stretch from spectra only: the ratio
+# of the instrument widths (narrowest lines) of DIII-D and NSTX, 2.4. Used to
+# train agnostic models whose input scale matches NSTX for line widths
+# (temperature) and line shifts (rotation) without any target label.
+D3D_TANGENTIAL_W24 = register(
+    dataclasses.replace(
+        D3D_TANGENTIAL,
+        name="d3d_tangential_w24",
+        wavelength_scale=2.4,
+        # rest pixel 133 at stretch 1.4 lies 5 bins right of the centre (128);
+        # at stretch 2.4 that offset becomes 5 * 2.4 / 1.4
+        rest_pixel=128.0 + 5.0 * 2.4 / 1.4,
+    )
+)
+
+# Tangential DIII-D with the wavelength convention from metadata only: the
+# spectrometer windows of the preprocessed files, DIII-D 532.0 -> 526.0 nm
+# (descending, all files) and NSTX 528.20 -> 530.28 nm (ascending). Flip:
+# opposite orientation; stretch: ratio of nm per resampled bin (6.0 / 2.08,
+# 2.842 after matching the resampling conventions of Preprocessor); shift:
+# window centres 529.00 vs 529.24 nm; rest pixel: C VI 529.05 nm on the
+# common grid. A line at a given wavelength lands on the same pixel on both
+# machines (tests/convention_check.py, residuals < 0.5 px).
+D3D_TANGENTIAL_META = register(
+    dataclasses.replace(
+        D3D_TANGENTIAL,
+        name="d3d_tangential_meta",
+        wavelength_flip=True,
+        wavelength_scale=2.842,
+        wavelength_shift=-29.0,
+        rest_pixel=104.6,
+    )
+)
+
+# Files rebuilt by cer_transfer.datasets.reprocess_d3d: every shot on the SAME
+# grid, 532.00 -> 526.00 nm in 536 bins (0.011194 nm/bin, descending), t01-t48
+# only (uint16), so one metadata convention holds for every file (the old
+# files vary between 390 and 538 bins with different windows at one pitch,
+# i.e. different nm per model bin after the fixed-size resampling). Folders
+# under the new data root keep their names; point CER_DATA_ROOT at that root.
+# Stretch/shift are the d3d_tangential_meta values, which tests/convention_check
+# verifies on exactly this grid against NSTX (lines within 0.5 px, same
+# width); the nominal 6.0/2.08 = 2.885 ignores the resampling details and is
+# ~2 px off at the window edges.
+D3D_TANGENTIAL_FIXED = register(
+    dataclasses.replace(
+        D3D_TANGENTIAL,
+        name="d3d_tangential_fixed",
+        n_raw_channels=48,  # rebuilt files hold t01-t48 only (uint16)
+        input_channel_indices=tuple(range(48)),
+        wavelength_flip=True,
+        wavelength_scale=2.842,
+        wavelength_shift=-29.0,
+        rest_pixel=104.6,
+        train_dir=Path("training_set_30"),
         val_dir=Path("test_set_30"),
     )
 )
@@ -377,6 +462,7 @@ D3D_TANGENTIAL = register(
 NSTX = register(
     MachineConfig(
         name="nstx",
+        rest_pixel=104.6,  # C VI 529.05 nm in the 528.20-530.28 nm window (shift_response: 103-108)
         n_raw_channels=51,  # 51 tangential CHERS channels
         target_scale=(1000.0, 1.0),  # files store Ti in keV -> canonical eV
         stem_w_pools=0,  # 80-100 bins: no stem pooling; trunk entry

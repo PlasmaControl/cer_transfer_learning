@@ -399,6 +399,17 @@ class Trainer:
             if train_config.augment
             else None
         )
+        self.randconv = None
+        if getattr(train_config, "randconv", None):
+            from cer_transfer.randconv import RandConv1d
+
+            self.randconv = RandConv1d(
+                kernel_sizes=train_config.randconv_kernels,
+                mode=train_config.randconv,
+                mixing=train_config.randconv_mixing,
+                identity_prob=train_config.randconv_identity_prob,
+                max_shift=train_config.randconv_max_shift,
+            ).to(device)
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
         self.norm_stats = (
             {k: v.to(device) for k, v in norm_stats.items()} if norm_stats else None
@@ -454,7 +465,13 @@ class Trainer:
                 _t = _now
             if self.augment is not None:
                 inputs = self.augment(inputs)
-            mu, sigma = self.model(inputs, moments.to(self.device, non_blocking=True))
+            moments_d = moments.to(self.device, non_blocking=True)
+            clean = inputs
+            if self.randconv is not None:
+                # RandConv: a new random kernel every step, one for the batch
+                self.randconv.randomize()
+                inputs = self.randconv(clean)
+            mu, sigma = self.model(inputs, moments_d)
             targets_n = normalize_targets(
                 targets, self.norm_stats, self.machine.targets
             )
@@ -465,7 +482,20 @@ class Trainer:
                     self.norm_stats,
                     self.machine.targets,
                 )
-            loss = self.criterion(mu, sigma, targets_n, err_n) / accum
+            loss = self.criterion(mu, sigma, targets_n, err_n)
+            cw = getattr(self.cfg, "consistency_w", 0.0)
+            if self.randconv is not None and cw > 0:
+                # RandConv consistency: two more random views of the same input
+                from cer_transfer.randconv import gaussian_consistency_loss
+
+                mus, sigs = [mu], [sigma]
+                for _ in range(2):
+                    self.randconv.randomize()
+                    m_, s_ = self.model(self.randconv(clean), moments_d)
+                    mus.append(m_)
+                    sigs.append(s_)
+                loss = loss + cw * gaussian_consistency_loss(mus, sigs)
+            loss = loss / accum
             loss.backward()
             if (k + 1) % accum == 0:
                 nn.utils.clip_grad_norm_(self.model.parameters(), self.cfg.grad_clip)

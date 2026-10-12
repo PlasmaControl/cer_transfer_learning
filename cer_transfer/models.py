@@ -166,7 +166,30 @@ class Backbone(nn.Module):
                 )
                 self.chord_merge = nn.Conv2d(sw, widths[1], 1, bias=cfg.bias)
                 self.chord_dim = sw * cfg.hidden_dim
-                if cfg.chord_attention:
+                self.chord_blocks = None
+                if cfg.chord_attention and getattr(cfg, "chord_attention_depth", 0) > 0:
+                    from functools import partial
+
+                    from cer_transfer.labram_blocks import Block
+
+                    # LaBraM's transformer blocks over the set of chords (no
+                    # positional embedding: chords carry no identity)
+                    self.chord_attn = None
+                    self.chord_blocks = nn.Sequential(
+                        *[
+                            Block(
+                                self.chord_dim,
+                                cfg.chord_attention_heads,
+                                mlp_ratio=4.0,
+                                qkv_bias=False,
+                                qk_norm=partial(nn.LayerNorm, eps=1e-6),
+                                drop=cfg.dropout,
+                                init_values=0.1,
+                            )
+                            for _ in range(cfg.chord_attention_depth)
+                        ]
+                    )
+                elif cfg.chord_attention:
                     self.chord_attn = nn.MultiheadAttention(
                         self.chord_dim, cfg.chord_attention_heads, batch_first=True
                     )
@@ -236,7 +259,11 @@ class Backbone(nn.Module):
         tok = self.pool(per_chord.reshape(b * c, f0, t, w1))
         tok = tok.reshape(b, c, f0, t, self.hidden_dim).permute(0, 1, 3, 2, 4)
         tok = tok.reshape(b, c, t, f0 * self.hidden_dim)
-        if self.chord_attn is not None:
+        if getattr(self, "chord_blocks", None) is not None:
+            q = tok.permute(0, 2, 1, 3).reshape(b * t, c, -1)  # (B*T, C, D)
+            q = self.chord_blocks(q)
+            tok = q.reshape(b, t, c, -1).permute(0, 2, 1, 3)
+        elif self.chord_attn is not None:
             # every chord attends over all chords of the same frame
             q = tok.permute(0, 2, 1, 3).reshape(b * t, c, -1)  # (B*T, C, D)
             att, _ = self.chord_attn(q, q, q, need_weights=False)

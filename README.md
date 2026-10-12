@@ -238,6 +238,60 @@ machine in one convention; the default pipeline is unaffected. `eval_checkpoint.
 `affine_fit` and `axis_sweep` scores the overlapping label range only (e.g. Ti below
 the source training range).
 
+**Scaling ladders** (`slurm/submit_agnostic_ladder.sh [nstx|d3d|both]`): one job per rung
+(`slurm/agnostic_ladder.sbatch`), NSTX on 325/650/1300/2600/5200/all discharges and DIII-D
+tangential on 500/1000/2000/4000/8000/all, each trained to early stopping (requeue-safe),
+evaluated on its own validation set and zero-shot on the other machine. Every rung writes
+`gallery/ladder/<tag>_{own,zero_shot}.csv`; `python -m cer_transfer.analysis.agnostic_ladder
+--plot figs/agnostic_ladder` tabulates and plots own-machine R2 and zero-shot affine R2 against
+the number of training discharges.
+
+`cer_transfer.analysis.domain_check` (`slurm/domain_check.sbatch`, CPU) measures, in the
+model's input space, how far the line moves per km/s, where the unshifted line sits and how
+its width grows with Ti on two machines, and prints the `wavelength_flip`, `wavelength_scale`
+and `wavelength_shift` that equalize shift scale and line position (stored per machine in
+`configs.py`), plus the remaining width-scale mismatch, which bounds what Ti transfer can do.
+
+`train.py --mirror-augment 0.5` (agnostic pipeline) reflects half of the training spectra
+about the machine's rest pixel (`MachineConfig.rest_pixel`, the line position at zero
+rotation in the resampled input) and negates their v_tor: the same plasma rotating the
+other way. A source machine whose data cover one rotation direction mainly then still
+covers both, which matters for transfer to a machine rotating the other way in the
+model's input.
+
+**Domain generalization from one source machine** (no target data or labels in training):
+`--randconv randconv|instrument` applies random convolutions along the wavelength axis,
+one kernel per step shared by all chords (`cer_transfer/randconv.py`, a reimplementation
+of RandConv, Xu et al., ICLR 2021: multi-scale kernels 1/3/5/7, Kaiming-normal weights,
+input mixing; `instrument` uses random Gaussian instrument kernels);
+`--randconv-max-shift` adds random line-position shifts; `--consistency-w` adds RandConv's
+consistency loss, here the KL divergence of each view's predictive Gaussian to their
+moment-matched mixture. `--chord-attention-depth N` uses N transformer blocks from LaBraM
+(Jiang et al., ICLR 2024, MIT license; `cer_transfer/labram_blocks.py`) for the context
+between chords, without positional embedding.
+
+`--stretch-augment LO HI` (agnostic pipeline, training only) stretches each training
+spectrum about the rest pixel by a factor a ~ log-uniform(LO, HI) and scales the labels
+consistently (v_tor and its uncertainty x a, T_i and its uncertainty x a^2): the same line
+from a faster and hotter plasma. It decouples both quantities from the absolute pixel scale
+and widens the label ranges seen in training; the instrument function is stretched too, so
+it is approximate.
+
+**Wavelength convention from metadata.** `d3d_tangential_meta` aligns DIII-D with NSTX using
+only the two spectrometer windows of the preprocessed files (DIII-D 532.0 -> 526.0 nm, NSTX
+528.20 -> 530.28 nm): flip, stretch 2.842, shift -29 bins, rest pixel 104.6 (C VI). A line of a
+given wavelength then lands on the same input pixel, with the same width, on both machines;
+`python -m tests.convention_check` verifies it. For a new device, the same four numbers follow
+from its window limits.
+
+**Scaling study of the machine-agnostic model.** Zero-shot point: `slurm/agnostic_scaling.sbatch`
+(task 0, evaluation only) evaluates the DIII-D agnostic model on the complete NSTX validation
+list. Baselines of the same architecture and training recipe, trained on NSTX from scratch on
+the nested subsets: `PREFIX=base RECIPE=dg slurm/submit_agnostic_ladder.sh nstx`. Optionally,
+`--array=1-6` fine-tunes the DIII-D model on the subsets in a single phase. `python -m
+cer_transfer.figures.plots scaling ... --agnostic-runs N:metrics.csv ... --zero-shot-csv
+gallery/agnostic_scaling/<prefix>_zero_shot.csv` adds them to the scaling figure.
+
 ## Conventions
 
 - NSTX CHERS records at 200 Hz and the recording starts 235 ms before the

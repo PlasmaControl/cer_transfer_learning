@@ -36,6 +36,8 @@ import seaborn as sns
 
 from cer_transfer.configs import data_path
 from cer_transfer.figures.common import chord_coordinate, sorted_chords
+from cer_transfer.figures.timeaxis import file_times  # noqa: E402
+from cer_transfer.figures.paperfig import PAPER_W, bbox  # noqa: E402
 
 sns.set_style("white")
 
@@ -57,6 +59,17 @@ def main():
         type=str,
         default="model",
         help="name of the --preds model in legends",
+    )
+    p.add_argument(
+        "--t-start",
+        type=float,
+        default=0.0,
+        help="start of the time axis in s (default 0)",
+    )
+    p.add_argument(
+        "--vtor-only",
+        action="store_true",
+        help="draw only the rotation row (spectrogram, time traces, profile)",
     )
     p.add_argument("--label2", type=str, default="background model")
     p.add_argument("--shot", type=Path, default=None)
@@ -147,7 +160,7 @@ def main():
         d2 = np.load(args.preds2)
         assert len(d2["chord"]) == len(ch), "preds2 shape mismatch"
         pr2 = d2["pred"].reshape(C, T, -1)
-    t_s = np.arange(T) / 200.0 + args.t_offset  # 200 Hz common time base
+    t_s = file_times(args.shot, T, 200.0, args.t_offset) if args.shot else np.arange(T) / 200.0 + args.t_offset
 
     lab_frac = np.isfinite(y[..., 0]).mean(axis=0)
     # well-labeled frame at PEAK plasma (max mean labeled Ti among the
@@ -166,24 +179,31 @@ def main():
             -np.inf,
         )
     f_lab = int(np.argmax(med_ti))
-    unl = np.where(lab_frac == 0)[0]
     f_unl = None
-    if unl.size:
-        # beam-off but plasma-active frame: just outside the labeled
-        # window, ranked by the model's own mean Ti (plasma proxy)
-        lab_t = np.where(lab_frac > 0)[0]
-        lo, hi = lab_t.min(), lab_t.max()
-        # between-fits frame: inside the beam window (spectra carry
-        # signal) but at a time the fitting cadence left unlabeled
-        cand = unl[(unl > lo) & (unl < hi)]
-        if cand.size == 0:
-            cand = unl
-        # at least unl-gap frames from the fitted display frame (gap 2
-        # = 10 ms = NSTX native cadence -> not an interpolated frame)
-        far = cand[np.abs(cand - f_lab) >= args.unl_gap]
-        if far.size:
-            cand = far
-        f_unl = int(cand[np.argmin(np.abs(cand - f_lab))])
+    lab_t = np.where(lab_frac > 0)[0]
+    if lab_t.size:
+        # NSTX records at 100 Hz: on the 200 Hz grid only every second frame
+        # is a measurement (same parity as the labeled frames); the others
+        # are interpolated and are never used as the no-fit frame.
+        par = np.bincount(lab_t % 2, minlength=2).argmax()
+        step = args.unl_gap if args.unl_gap % 2 == 0 else args.unl_gap + 1
+        # continuity pair: a well-fitted native frame and the native frame
+        # `step` frames (10 ms for step 2) before or after it that has no
+        # fit at all (beam switched off or fit failed) -- the plasma barely
+        # changes in between, so the two profiles must agree
+        pairs = []
+        for f in np.where(cover & (np.arange(T) % 2 == par))[0]:
+            for g in (f + step, f - step):
+                if 0 <= g < T and lab_frac[g] == 0:
+                    pairs.append((med_ti[f], f, g))
+        if pairs:
+            _, f_lab, f_unl = max(pairs)
+            f_lab, f_unl = int(f_lab), int(f_unl)
+        else:
+            print(
+                "warning: no fitted frame with a native no-fit neighbour; "
+                "showing the fitted profile only"
+            )
 
     tr_chords = [int(x) for x in args.trace_chords.split(",")]
 
@@ -194,11 +214,17 @@ def main():
         # target. Frame-level: median over chords, both targets must pass.
         psig = d["pred_sigma"].reshape(C, T, -1)
         ok = np.ones(T, bool)
-        for t in range(y.shape[-1]):
+        gate_targets = [1] if args.vtor_only else range(y.shape[-1])
+        for t in gate_targets:
             prior = np.nanstd(y[..., t])
             ok &= np.median(psig[..., t], axis=0) < prior
         k = 5
         gate = np.convolve(ok.astype(int), np.ones(k, int), "same") >= k
+        if gate.sum() < k:
+            # the model's own sigma never beats the prior (e.g. a target it
+            # cannot read on this machine): fall back to the emission gate
+            print("info gate empty -> using the emission (amplitude) gate")
+            gate = None
 
     spec = None
     if args.shot is not None:
@@ -206,6 +232,8 @@ def main():
 
         s = load(data_path(args.shot), mmap_mode="r")
         end = int(s["end_index"])
+        if end <= 0:  # <= 0 means the whole recording
+            end = s["input"].shape[1]
         spec = {
             cc: np.asarray(s["input"][cc, :end, :], dtype=np.float32)
             for cc in tr_chords
@@ -228,8 +256,15 @@ def main():
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             ncols = 3 if spec is not None else 2
-            size = (7.2, 4.6) if ctx == "paper" else (13.5, 8)
-            fig, axes = plt.subplots(2, ncols, figsize=size)
+            size = (PAPER_W, 4.4) if ctx == "paper" else (13.5, 8)
+            fig, axes = plt.subplots(
+                2,
+                ncols,
+                figsize=size,
+                # rotation only: the T_i row is drawn into a negligible row
+                # and removed afterwards (keeps the panel code unchanged)
+                gridspec_kw={"height_ratios": [1, 0.01]} if args.vtor_only else None,
+            )
             col = 0
             if spec is not None:
                 for r, cc in enumerate(tr_chords[:2]):
@@ -258,23 +293,24 @@ def main():
                 """Time traces of the selected chords for one target."""
                 vals = []
                 for i, cc in enumerate(tr_chords):
+                    c1 = c2 = f"C{i}"
                     if ps is not None:
                         ax.fill_between(
                             t_s,
                             pr[cc, :, k] - ps[cc, :, k],
                             pr[cc, :, k] + ps[cc, :, k],
-                            color=f"C{i}",
+                            color=c1,
                             alpha=0.2,
                             lw=0,
                             zorder=1,
                         )
-                    ax.plot(t_s, pr[cc, :, k], "-", color=f"C{i}", lw=1.6, zorder=2)
+                    ax.plot(t_s, pr[cc, :, k], "-", color=c1, lw=1.6, zorder=2)
                     if pr2 is not None:
                         ax.plot(
                             t_s,
                             pr2[cc, :, k],
                             "-.",
-                            color=f"C{i}",
+                            color=c2,
                             lw=1.2,
                             alpha=0.9,
                             zorder=2,
@@ -303,12 +339,12 @@ def main():
             # time traces at fixed chords
             ax = axes[0, col]
             trace_panel(ax, 1, "$v_{tor}$ (km/s)")
-            ax.set_title("time traces", fontsize="medium")
+            ax.set_title(f"time traces, {args.label1}" if pr2 is None else "time traces", fontsize="small")
             if pr2 is None:
                 hnd = [
                     Line2D([], [], color=f"C{i}", lw=1.6) for i in range(len(tr_chords))
                 ]
-                lbl = [f"chord {cc} ({args.label1})" for cc in tr_chords]
+                lbl = [f"chord {cc}" for cc in tr_chords]  # the model is named in the column title
                 if ps is not None:
                     hnd.append(Patch(color="0.6", alpha=0.35))
                     lbl.append(band_lab)
@@ -382,10 +418,12 @@ def main():
                 return spans
 
             def profile_panel(ax, k, ylab, legend, label_span):
+                # rotation-only figure: model 1 in a colour no chord uses (red),
+                # model 2 as grey reference; otherwise the paper's colours
+                pc1 = "C3" if args.vtor_only else "C0"  # model 1 (solid)
+                pc2 = "0.45" if args.vtor_only else "C2"  # model 2 (dash-dot)
                 """Profile at the fitted (and fit-free) frame for one target."""
-                spans = nofit_spans(k)
-                for lo_, hi_ in spans:
-                    ax.axvspan(lo_, hi_, color="0.9", zorder=0, lw=0)
+                spans = []  # no "no conventional fit" area: the x-range ends at the last fitted chord
                 if ps is not None:
                     # band only for the fitted-time profile; lighter where no
                     # fit exists (large uncertainty, may leave the axes)
@@ -399,7 +437,7 @@ def main():
                         lo_b,
                         hi_b,
                         where=fitm | ~nof_ext | (fitm & nof_ext),
-                        color="C0",
+                        color=pc1,
                         alpha=0.2,
                         lw=0,
                         zorder=1,
@@ -409,17 +447,15 @@ def main():
                         lo_b,
                         hi_b,
                         where=nof_ext,
-                        color="C0",
+                        color=pc1,
                         alpha=0.07,
                         lw=0,
                         zorder=1,
                     )
-                ax.plot(xs, pr[order, f_lab, k], "-", color="C0", lw=1.6, zorder=2)
+                ax.plot(xs, pr[order, f_lab, k], "-", color=pc1, lw=1.6, zorder=2)
                 curves = [pr[order, f_lab, k]]
                 if pr2 is not None:
-                    ax.plot(
-                        xs, pr2[order, f_lab, k], "-.", color="C2", lw=1.5, zorder=2
-                    )
+                    ax.plot(xs, pr2[order, f_lab, k], "-.", color=pc2, lw=1.5, zorder=2)
                     curves.append(pr2[order, f_lab, k])
                 if f_unl is not None:
                     ax.plot(xs, pr[order, f_unl, k], "--", color="C3", lw=1.5, zorder=2)
@@ -448,7 +484,11 @@ def main():
                 ax.set_ylabel(ylab)
                 dx = np.diff(xs)
                 pad = 0.5 * (float(np.median(dx)) if dx.size else 0.5)
-                ax.set_xlim(xs[0] - pad, xs[-1] + pad)
+                fitx = xs[np.isfinite(y[order, f_lab, k])]
+                if fitx.size >= 2:
+                    ax.set_xlim(fitx.min() - pad, fitx.max() + pad)
+                else:
+                    ax.set_xlim(xs[0] - pad, xs[-1] + pad)
                 if label_span and spans:
                     lo_, hi_ = max(spans, key=lambda s_: s_[1] - s_[0])
                     ax.text(
@@ -462,16 +502,16 @@ def main():
                         transform=ax.get_xaxis_transform(),
                     )
                 if legend:
-                    hh = [Line2D([], [], color="C0", lw=1.6)]
-                    ll = [f"{args.label1}, t = {t_s[f_lab]:.3f} s"]
+                    hh = [Line2D([], [], color=pc1, lw=1.6)]
+                    ll = ["model" if pr2 is None else args.label1]
                     if pr2 is not None:
                         hh.append(Line2D([], [], color="C2", ls="-.", lw=1.5))
-                        ll.append(f"{args.label2}, t = {t_s[f_lab]:.3f} s")
+                        ll.append(args.label2)
                     if f_unl is not None:
                         hh.append(Line2D([], [], color="C3", ls="--", lw=1.5))
-                        ll.append(f"{args.label1}, t = {t_s[f_unl]:.3f} s (no fit)")
+                        ll.append(f"model, t = {t_s[f_unl]:.3f} s (no fit)")
                     hh.append(Line2D([], [], color="k", marker="o", ls="", ms=3))
-                    ll.append(f"conventional fit, t = {t_s[f_lab]:.3f} s")
+                    ll.append("conventional fit")
                     # core rotation is high, so the lower left stays empty
                     ax.legend(
                         hh,
@@ -484,7 +524,7 @@ def main():
 
             ax = axes[0, col + 1]
             profile_panel(ax, 1, "$v_{tor}$ (km/s)", legend=True, label_span=True)
-            ax.set_title("profiles: model vs. fit", fontsize="medium")
+            ax.set_title(f"profiles at t = {t_s[f_lab]:.3f} s", fontsize="medium")
             ax = axes[1, col + 1]
             profile_panel(ax, 0, "$T_i$ (eV)", legend=False, label_span=False)
             ax.set_xlabel(xlab)
@@ -499,13 +539,51 @@ def main():
                 if (gate is not None and gate.any())
                 else t_s[-1]
             )
+            if args.t_start is not None:
+                t0 = args.t_start  # fixed start of the time axis (default 0 s)
             for r in range(2):
                 for cix in range(col + 1):
                     axes[r, cix].set_xlim(t0, t1)
 
-            fig.tight_layout()
+            if args.vtor_only:
+                # the paper figure's top row; legends moved above the panels:
+                # line style = model (both panels), colour = chord (time traces)
+                for a in axes[1]:
+                    fig.delaxes(a)
+                for cix in range(col + 1):
+                    axes[0, cix].set_xlabel("time (s)")
+                pax = axes[0, col + 1]
+                pax.set_xlabel(xlab)
+                pax.set_title(f"profiles at t = {t_s[f_lab]:.3f} s", fontsize="medium")
+                for a in axes[0]:
+                    if a.get_legend() is not None:
+                        a.get_legend().remove()
+                hh = [Line2D([], [], color="C3", lw=1.6)]
+                ll = [args.label1]
+                if pr2 is not None:
+                    hh.append(Line2D([], [], color="0.45", ls="-.", lw=1.5))
+                    ll.append(args.label2)
+                if ps is not None:
+                    hh.append(Patch(color="0.6", alpha=0.35))
+                    ll.append("model uncertainty")
+                hh.append(Line2D([], [], color="k", marker="o", ls="", ms=3))
+                ll.append("conventional fit")
+                w, h = fig.get_size_inches()
+                fig.set_size_inches(w, h * 0.6)
+                fig.tight_layout(rect=(0, 0, 1, 0.88))
+                fig.legend(
+                    hh,
+                    ll,
+                    loc="upper center",
+                    ncol=len(ll),
+                    fontsize="small",
+                    frameon=False,
+                    bbox_to_anchor=(0.5, 1.0),
+                )
+            else:
+                fig.tight_layout()
             fig.savefig(
-                args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches="tight"
+                args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches=bbox(ext)
             )
             plt.close(fig)
     print(

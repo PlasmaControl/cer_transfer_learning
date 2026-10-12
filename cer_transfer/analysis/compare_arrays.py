@@ -97,7 +97,7 @@ def main():
     def read_list(f):
         """Paths of a file list (comments and blanks skipped)."""
         return {
-            Path(ln.strip()).stem: Path(ln.strip())
+            Path(ln.strip()).stem: data_path(ln.strip())
             for ln in f.read_text().splitlines()
             if ln.strip() and not ln.strip().startswith("#")
         }

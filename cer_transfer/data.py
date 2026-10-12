@@ -43,6 +43,7 @@ class Preprocessor:
         resample_w: Optional[int] = None,
         w_scale: float = 1.0,
         flip_w: bool = False,
+        w_shift: float = 0.0,
     ):
         self.baseline_region = machine.baseline_region
         self.resample_w = resample_w
@@ -54,6 +55,9 @@ class Preprocessor:
         # the default pipeline is unchanged
         self.w_scale = w_scale * (machine.wavelength_scale if resample_w else 1.0)
         self.flip_w = flip_w != (bool(machine.wavelength_flip) if resample_w else False)
+        self.w_shift = (
+            int(round(machine.wavelength_shift + w_shift)) if resample_w else 0
+        )
 
     def __call__(self, spec: np.ndarray) -> torch.Tensor:
         """spec: (C, T, W) float array -> log10 spectrogram tensor."""
@@ -86,6 +90,14 @@ class Preprocessor:
                 t = torch.nn.functional.pad(
                     t, (pad // 2, pad - pad // 2), mode="replicate"
                 )
+            if self.w_shift:
+                # move the spectrum by w_shift bins (positive: towards higher
+                # bins), filling with the edge values
+                k = abs(self.w_shift)
+                if self.w_shift > 0:
+                    t = torch.nn.functional.pad(t[..., :-k], (k, 0), mode="replicate")
+                else:
+                    t = torch.nn.functional.pad(t[..., k:], (0, k), mode="replicate")
         return t
 
 
@@ -108,6 +120,9 @@ class ShotDataset(Dataset):
         resample_w: Optional[int] = None,
         w_scale: float = 1.0,
         flip_w: bool = False,
+        w_shift: float = 0.0,
+        mirror_p: float = 0.0,
+        stretch_aug: Optional[tuple] = None,
     ):
         """mmap=True: memory-map files, materialize slices via page faults
         (random small reads — latency-bound on GPFS). mmap=False: read each
@@ -119,7 +134,32 @@ class ShotDataset(Dataset):
         self.machine = machine
         self.subseq_len = subseq_len
         self.mmap = mmap
-        self.preprocess = Preprocessor(machine, resample_w, w_scale, flip_w)
+        self.preprocess = Preprocessor(machine, resample_w, w_scale, flip_w, w_shift)
+        # mirror augmentation (training only): reflect the resampled spectrum
+        # about the rest pixel and negate v_tor -- the same plasma rotating the
+        # other way, so both rotation directions are covered equally
+        self.mirror_p = float(mirror_p)
+        if self.mirror_p > 0:
+            if resample_w is None or machine.rest_pixel is None:
+                raise ValueError("mirror augmentation needs resample_w and rest_pixel")
+            w = np.arange(resample_w)
+            self._mirror_idx = np.clip(
+                np.round(2 * machine.rest_pixel - w), 0, resample_w - 1
+            ).astype(np.int64)
+            self._vtor_k = list(machine.targets).index("vtor")
+        # label-consistent stretch augmentation (training only): stretch the
+        # resampled spectrum about the rest pixel by a ~ log-uniform(lo, hi);
+        # a Doppler shift scales with a (v_tor * a) and the Doppler width with
+        # a, i.e. T_i * a**2. Approximate: the instrument function is
+        # stretched as well.
+        self.stretch_aug = tuple(stretch_aug) if stretch_aug else None
+        if self.stretch_aug is not None:
+            if resample_w is None or machine.rest_pixel is None:
+                raise ValueError("stretch augmentation needs resample_w and rest_pixel")
+            self._rest = float(machine.rest_pixel)
+            self._w = resample_w
+            self._ti_k = list(machine.targets).index("ti")
+            self._vt_k = list(machine.targets).index("vtor")
 
         self._input_idx = (
             None
@@ -154,10 +194,23 @@ class ShotDataset(Dataset):
         # file), so the opens run in a thread pool; IO releases the GIL.
         _t0 = time.time()
 
+        n_raw = machine.n_raw_channels
+
         def _end_index(fp):
             dd = load(fp, mmap_mode="r")
             n = int(dd["end_index"])
+            c = dd["input"].shape[0]
             del dd
+            if c != n_raw:
+                # a file of another machine would otherwise be read through
+                # this machine's channel map and wavelength convention
+                # (flip/stretch/shift) without any error
+                raise ValueError(
+                    f"{fp}: {c} spectrometer channels, but machine "
+                    f"'{machine.name}' expects {n_raw}; pass the machine the "
+                    "files belong to (eval_checkpoint.py / figure scripts: "
+                    "--machine <name>, make_figs.sh: BEAMOFF_MACHINE)"
+                )
             return n
 
         with ThreadPoolExecutor(max_workers=32) as ex:
@@ -305,6 +358,29 @@ class ShotDataset(Dataset):
             error = error[self._chord_idx]
             moments = moments[self._chord_idx]
 
+        if self.mirror_p > 0 and torch.rand(1).item() < self.mirror_p:
+            spec_t = spec_t[..., torch.from_numpy(self._mirror_idx)]
+            target = target.copy()
+            target[..., self._vtor_k] = -target[..., self._vtor_k]
+        if self.stretch_aug is not None:
+            lo, hi = self.stretch_aug
+            u = torch.rand(1).item()  # torch RNG: seeded per data-loader worker
+            a = float(np.exp(np.log(lo) + u * (np.log(hi) - np.log(lo))))
+            if abs(a - 1.0) > 1e-3:
+                src = (
+                    self._rest
+                    + (torch.arange(self._w, dtype=torch.float32) - self._rest) / a
+                )
+                src = src.clamp(0, self._w - 1)
+                i0 = src.floor().long().clamp(max=self._w - 2)
+                fr = (src - i0.float()).to(spec_t.dtype)
+                spec_t = spec_t[..., i0] * (1 - fr) + spec_t[..., i0 + 1] * fr
+                target = target.copy()
+                error = error.copy()
+                target[..., self._vt_k] *= a
+                error[..., self._vt_k] *= a
+                target[..., self._ti_k] *= a * a
+                error[..., self._ti_k] *= a * a
         return (
             spec_t,
             torch.from_numpy(target),

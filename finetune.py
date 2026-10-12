@@ -309,6 +309,9 @@ def main():
         scheduler_state = resumed.get("scheduler_state")
     else:
         start_epoch, optimizer_state, scheduler_state = 0, None, None
+    if not resume and ft_cfg.probe_epochs <= 0:
+        probe_best = None  # single-phase fine-tune (nothing freshly initialized)
+    elif not resume:
         # ---- Phase 1: probe — freeze transferred parts; train head + fresh stem
         for prm in model.backbone.parameters():
             prm.requires_grad_(False)

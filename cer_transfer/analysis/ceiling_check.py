@@ -89,7 +89,7 @@ def main():
     machine = get_machine(args.machine)
     scale = np.asarray(machine.target_scale, dtype=np.float64)
     files = [
-        Path(ln.strip())
+        data_path(ln.strip())
         for ln in args.list.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
