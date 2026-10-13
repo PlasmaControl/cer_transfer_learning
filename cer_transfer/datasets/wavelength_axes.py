@@ -167,6 +167,7 @@ def estimate_axis(job_path, raw_path, channels=range(24), n_best=8):
     (first, last, corr)
         Wavelength of the first and last bin (nm) and the mean correlation
         at the optimum (close to 1 for a correct axis).
+
     """
     import h5py
 

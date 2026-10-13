@@ -165,7 +165,10 @@ def main():
         # for either direction of the time axis.
         t_lo, t_hi = (ts[-1], ts[0]) if args.time_toward else (ts[0], ts[-1])
         vy = np.cos(np.radians(args.elev)) * np.sin(np.radians(args.azim))
-        depth = lambda tt: ((tt - t_lo) / (t_hi - t_lo)) * vy
+
+        def depth(tt):
+            return ((tt - t_lo) / (t_hi - t_lo)) * vy
+
         far_to_near = sorted(zip(frames, ts), key=lambda ft: depth(ft[1]))
         for rank, (f, tt) in enumerate(far_to_near):
             z = mu[order, f]

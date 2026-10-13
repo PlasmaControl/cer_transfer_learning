@@ -33,6 +33,7 @@ class AugmentationPipeline(nn.Module):
         Maximum width (bins) of the wavelength mask.
     time_mask_param : int, default=120
         Maximum width (frames) of the time mask.
+
     """
 
     def __init__(self, wavelength_mask_param: int = 200, time_mask_param: int = 120):
@@ -59,6 +60,7 @@ class AugmentationPipeline(nn.Module):
         -------
         Tensor
             Same shape, with one random band in time and in wavelength zeroed.
+
         """
         if not self.training:
             return spec

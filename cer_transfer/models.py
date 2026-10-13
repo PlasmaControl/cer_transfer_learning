@@ -48,6 +48,7 @@ class ResidualBlock(nn.Module):
         Convolution bias.
     norm : {'group', 'batch'}, default='group'
         Normalization layer after each convolution.
+
     """
 
     def __init__(
@@ -84,6 +85,7 @@ class ResidualBlock(nn.Module):
         Returns
         -------
         Tensor of shape (B, C_out, T, W)
+
         """
         out = self.act(self.norm1(self.conv1(x)))
         out = self.norm2(self.conv2(out))
@@ -237,6 +239,7 @@ class Backbone(nn.Module):
         Tensor of shape (B, F, T, hidden_dim)
             ``F`` is ``C_in`` in legacy mode or ``cfg.feature_width`` in
             stem/trunk mode; the time axis is preserved.
+
         """
         w_after = x.shape[-1] >> self.n_pools
         if w_after < self.hidden_dim:
@@ -274,7 +277,8 @@ class Backbone(nn.Module):
     def param_groups(self):
         """(early, late) parameter lists for discriminative fine-tuning.
         In stem/trunk mode the stem is EXCLUDED from both (it is fresh per
-        machine and should train at head-level LR; see stem_parameters)."""
+        machine and should train at head-level LR; see stem_parameters).
+        """
         early_ids = {id(p) for p in self.early.parameters()}
         stem_ids = (
             {id(p) for p in self.stem.parameters()}
@@ -294,6 +298,7 @@ class Backbone(nn.Module):
         Returns
         -------
         list of Parameter
+
         """
         if self.feature_width is None or self.agnostic:
             return []  # legacy: no stem; agnostic: the stem is shared, not fresh
@@ -372,6 +377,7 @@ class SharedTrunkHead(nn.Module):
         -------
         mu, sigma : Tensor of shape (B, n_chords, T, n_targets)
             Normalized-unit predictions; ``sigma`` is positive (softplus).
+
         """
         chord_feats = None
         if isinstance(x, tuple):
@@ -459,6 +465,7 @@ class FullChordHead(nn.Module):
         Returns
         -------
         mu, sigma : Tensor of shape (B, n_chords, T, n_targets)
+
         """
         outs = torch.stack([h(x) for h in self.chord_heads], dim=1)
         mu = outs[..., : self.n_targets]
@@ -483,6 +490,7 @@ def build_head(
     nn.Module
         ``SharedTrunkHead`` for ``'linear'`` / ``'mlp'``, ``FullChordHead``
         for ``'full'``.
+
     """
     if cfg.head_type in ("linear", "mlp"):
         return SharedTrunkHead(machine, n_backbone_channels, cfg)
@@ -500,6 +508,7 @@ class CERModel(nn.Module):
         Defines input channels, chords and targets.
     cfg : ModelConfig
         Architecture hyperparameters.
+
     """
 
     def __init__(self, machine: MachineConfig, cfg: ModelConfig):
@@ -521,6 +530,7 @@ class CERModel(nn.Module):
         Returns
         -------
         mu, sigma : Tensor of shape (B, n_chords, T, n_targets)
+
         """
         f = self.backbone(x)
         try:
@@ -540,6 +550,7 @@ def build_model(machine: MachineConfig, cfg: ModelConfig) -> CERModel:
     Returns
     -------
     CERModel
+
     """
     if cfg.agnostic:
         if cfg.head_type == "full":
@@ -629,7 +640,8 @@ def transfer_full_head(
     """Warm-start the ENTIRE head (shared trunk + all per-chord readouts)
     from a source machine. Requires identical head architecture and chord
     count (e.g. NSTX -> NSTX-U, 51/51). Geometry shifts between machines are
-    handled by fine-tuning, not by re-initialization."""
+    handled by fine-tuning, not by re-initialization.
+    """
     state = (
         _strip_running_stats(source_head_state)
         if reset_norm_running_stats
@@ -651,7 +663,8 @@ def transfer_head_trunk(
 ) -> None:
     """Load the shared trunk of a SharedTrunkHead (trunk_conv + trunk_mlp)
     from a source machine; per-chord readouts stay fresh. Valid because the
-    head trunk's input width is the backbone's fixed feature width."""
+    head trunk's input width is the backbone's fixed feature width.
+    """
     state = {
         k: v
         for k, v in source_head_state.items()

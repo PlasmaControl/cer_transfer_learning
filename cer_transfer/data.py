@@ -128,7 +128,8 @@ class ShotDataset(Dataset):
         (random small reads — latency-bound on GPFS). mmap=False: read each
         shot's file sequentially in full on first access (the pattern GPFS
         prefers), keep only the most recent shot per worker (batches are
-        per-shot, so an LRU of size 1 gets all hits within a batch)."""
+        per-shot, so an LRU of size 1 gets all hits within a batch).
+        """
         super().__init__()
         self.file_paths = [Path(p) for p in file_paths]
         self.machine = machine
@@ -396,6 +397,7 @@ def worker_init_fn(worker_id: int) -> None:
     ----------
     worker_id : int
         Worker index assigned by the DataLoader.
+
     """
     get_worker_info().dataset.worker_init()
 
@@ -403,7 +405,8 @@ def worker_init_fn(worker_id: int) -> None:
 def compute_tail_weights(dataset, gamma: float, quantile: float = 0.90) -> dict:
     """{f_idx: weight} with weight = (q_shot / median_q)^gamma, where q_shot
     is the per-shot `quantile` of |vtor| labels (canonical km/s). gamma=0 ->
-    uniform. Cheap pass: reads target arrays only."""
+    uniform. Cheap pass: reads target arrays only.
+    """
     from joblib import load as _jload
 
     scale = float(np.asarray(dataset.machine.target_scale)[1])
@@ -431,7 +434,8 @@ def compute_tail_weights(dataset, gamma: float, quantile: float = 0.90) -> dict:
 class PerShotBatchSampler(Sampler):
     """Batches of subsequences drawn from a single shot; shot order and
     within-shot order shuffled each epoch (seedable via a torch.Generator
-    for reproducible HPO)."""
+    for reproducible HPO).
+    """
 
     def __init__(
         self,
@@ -443,7 +447,8 @@ class PerShotBatchSampler(Sampler):
         """shot_weights: optional {f_idx: weight}; when given, each epoch
         draws len(file_list) shots WITH replacement, probability
         proportional to weight (tail oversampling for imbalanced
-        regression). Epoch length is preserved in expectation."""
+        regression). Epoch length is preserved in expectation.
+        """
         self.batch_size = batch_size
         self.generator = generator
         self.file_to_indices: dict[int, list[int]] = {}

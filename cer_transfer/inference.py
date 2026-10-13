@@ -39,6 +39,7 @@ def load_model(
     SimpleNamespace
         ``model`` (eval mode), ``machine``, ``config``, ``stats`` (target
         normalization), ``device``, ``best_score``, ``epoch``.
+
     """
     ckpt = load_checkpoint(Path(checkpoint))
     cfg = ModelConfig(**ckpt["model_config"])
@@ -80,6 +81,7 @@ def predict_file(m: SimpleNamespace, path) -> SimpleNamespace:
         Arrays of shape (chords, frames, targets): ``pred`` and ``pred_sigma``
         from the model, ``y`` and ``sigma`` the conventional fits and their
         uncertainties (NaN where none exists); ``targets`` names the columns.
+
     """
     ds = ShotDataset(
         [data_path(path)],
@@ -114,6 +116,7 @@ def export_inference_checkpoint(src, dst) -> Path:
     -------
     Path
         The written file.
+
     """
     ckpt = load_checkpoint(Path(src))
     keep = {

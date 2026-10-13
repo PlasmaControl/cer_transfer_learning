@@ -14,6 +14,7 @@ import dataclasses
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional, Sequence
 
 # Root of the discharge files. Split lists and the default data directories
 # hold paths relative to it; absolute paths are used as they are.
@@ -32,6 +33,7 @@ def data_path(p) -> Path:
     -------
     Path
         ``p`` unchanged if absolute, else ``CER_DATA_ROOT / p``.
+
     """
     p = Path(p)
     return p if p.is_absolute() else DATA_ROOT / p
@@ -49,15 +51,13 @@ def list_entry(p) -> str:
     -------
     str
         Relative to ``CER_DATA_ROOT`` when the file lies inside it, else absolute.
+
     """
     p = Path(p).resolve()
     try:
         return str(p.relative_to(DATA_ROOT.resolve()))
     except ValueError:
         return str(p)
-
-
-from typing import Optional, Sequence
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,7 @@ class MachineConfig:
         on how a shot was chunked.)
     train_dir, val_dir : Path, optional
         Default data locations on the cluster.
+
     """
 
     name: str
@@ -235,6 +236,7 @@ class TrainConfig:
         Reproducibility seed, loader workers, per-epoch profiling.
     augment, wavelength_mask_param, time_mask_param : bool, int, int
         SpecAugment-style masking of the input spectrograms.
+
     """
 
     lr: float = 1e-3
@@ -304,6 +306,7 @@ def register(cfg: MachineConfig) -> MachineConfig:
     -------
     MachineConfig
         The same object, for use as a decorator-like helper.
+
     """
     if cfg.name in _REGISTRY:
         raise ValueError(f"machine '{cfg.name}' already registered")
@@ -327,6 +330,7 @@ def get_machine(name: str) -> MachineConfig:
     ------
     KeyError
         If no machine of that name is registered.
+
     """
     try:
         return _REGISTRY[name]
@@ -462,7 +466,8 @@ D3D_TANGENTIAL_FIXED = register(
 NSTX = register(
     MachineConfig(
         name="nstx",
-        rest_pixel=104.6,  # C VI 529.05 nm in the 528.20-530.28 nm window (shift_response: 103-108)
+        # C VI 529.05 nm in the 528.20-530.28 nm window (shift_response: 103-108)
+        rest_pixel=104.6,
         n_raw_channels=51,  # 51 tangential CHERS channels
         target_scale=(1000.0, 1.0),  # files store Ti in keV -> canonical eV
         stem_w_pools=0,  # 80-100 bins: no stem pooling; trunk entry

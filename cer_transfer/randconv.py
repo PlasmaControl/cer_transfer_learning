@@ -55,6 +55,7 @@ class RandConv1d(nn.Module):
     max_shift : int, default=0
         If > 0, also shift the spectrum by a random number of bins in
         [-max_shift, max_shift] (edge values replicated), all chords together.
+
     """
 
     def __init__(
@@ -138,6 +139,7 @@ def gaussian_consistency_loss(mus, sigmas, mask=None):
     -------
     Tensor
         Scalar loss.
+
     """
     mu = torch.stack(mus)
     var = torch.stack(sigmas) ** 2

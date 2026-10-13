@@ -62,6 +62,7 @@ def save_checkpoint(
         Epoch at which the weights were saved.
     optimizer_state, scheduler_state : dict, optional
         States for exact resumption.
+
     """
     torch.save(
         {
@@ -94,13 +95,15 @@ def load_checkpoint(path: Path, map_location="cpu") -> dict:
         Keys ``model_state``, ``norm_stats``, ``machine``, ``model_config``,
         ``best_score``, ``epoch``, optional ``optimizer_state``,
         ``scheduler_state`` and ``finished``.
+
     """
     return torch.load(path, map_location=map_location, weights_only=False)
 
 
 def mark_finished(path: Path, reason: str) -> None:
     """Record in an existing checkpoint that its run completed (early stop or
-    epoch limit). --resume then refuses to continue it unless forced."""
+    epoch limit). --resume then refuses to continue it unless forced.
+    """
     if path is None or not Path(path).exists():
         return
     ckpt = load_checkpoint(path)
@@ -171,7 +174,8 @@ class EarlyStopping:
 def compute_norm_stats_per_chord(dataset, targets):
     """Per-chord mean/std of each target over the dataset (canonical units).
     Returns {"mean": (C, n_t), "std": (C, n_t)} float32 tensors. NaN labels
-    ignored; chords with <100 labeled points fall back to global stats."""
+    ignored; chords with <100 labeled points fall back to global stats.
+    """
     from joblib import load as _load
 
     chord_idx = (
@@ -280,6 +284,7 @@ def normalize_targets(target, stats, targets):
     Tensor
         ``(target - mean) / std``, per target (and per chord if the statistics
         are per chord).
+
     """
     if "mean" in stats:
         # per-chord stats: mean/std are (C, n_t); target is (.., C, T, n_t)
@@ -316,6 +321,7 @@ def denormalize_mu_sigma(mu, sigma, stats, targets):
     -------
     mu, sigma : Tensor
         ``mu * std + mean`` and ``sigma * std``.
+
     """
     if "mean" in stats:
         std = stats["std"].unsqueeze(-2)
@@ -359,6 +365,7 @@ class Trainer:
         Objects with ``log(row)`` and ``close()`` (CSV, TensorBoard).
     log_extra : dict, optional
         Columns added to every logged row (e.g. the fine-tuning phase).
+
     """
 
     def __init__(
@@ -539,6 +546,7 @@ class Trainer:
         dict
             ``val_loss`` and per-target R2 / RMSE in canonical units, plus the
             combined ``val_score`` used for model selection.
+
         """
         self.model.eval()
         for m in (*self.r2.values(), *self.rmse.values()):
@@ -590,7 +598,8 @@ class Trainer:
     ) -> float:
         """Train until early stopping or the epoch limit. With ``final`` the
         checkpoint is marked finished afterwards (not for a probe phase that
-        is followed by further training)."""
+        is followed by further training).
+        """
         if self.norm_stats is None and getattr(self.cfg, "per_chord_norm", False):
             self.norm_stats = {
                 k: v.to(self.device)
@@ -693,7 +702,8 @@ def set_random_seed(seed: int, deterministic: bool = False) -> None:
     training script never enabled this (it seeded nothing); default False
     matches that behavior. Note: cudnn.benchmark stays False because input
     shapes vary per shot (variable W), which would trigger continuous
-    re-benchmarking."""
+    re-benchmarking.
+    """
     import random
 
     random.seed(seed)

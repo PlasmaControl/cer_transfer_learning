@@ -177,7 +177,7 @@ def main():
             print(f"... {i + 1}/{len(ds)} shots")
 
     pred = np.concatenate([p.reshape(C, -1, n_t) for p in preds], axis=1)
-    lab = np.concatenate([l.reshape(C, -1, n_t) for l in labels], axis=1)
+    lab = np.concatenate([lb.reshape(C, -1, n_t) for lb in labels], axis=1)
     sig = np.concatenate([s.reshape(C, -1, n_t) for s in sigmas_l], axis=1)
     if args.first_chords:
         C = min(args.first_chords, C)
@@ -305,8 +305,8 @@ def main():
         for k in range(-3, 4):
             num = den = 0.0
             cnt = 0
-            for p, l in zip(preds, labels):
-                pv, lv = p[..., 1], l[..., 1]
+            for p, lb in zip(preds, labels):
+                pv, lv = p[..., 1], lb[..., 1]
                 if k > 0:
                     pv, lv = pv[:, k:], lv[:, : lv.shape[1] - k]
                 elif k < 0:
@@ -339,8 +339,8 @@ def main():
         print("\nframe-mean |z| distribution (bimodality test):")
         for t, name in enumerate(machine.targets):
             fm = []
-            for p, l, s in zip(preds, labels, sigmas_l):
-                y, yh, sg = l[..., t], p[..., t], s[..., t]
+            for p, lb, s in zip(preds, labels, sigmas_l):
+                y, yh, sg = lb[..., t], p[..., t], s[..., t]
                 m = np.isfinite(y) & np.isfinite(sg) & (sg > 0)
                 with np.errstate(invalid="ignore"):
                     z = np.where(m, np.abs(y - yh) / np.where(m, sg, 1), np.nan)
@@ -364,8 +364,8 @@ def main():
             num = den = 0.0
             pc_plain = [[] for _ in range(C)]
             pc_corr = [[] for _ in range(C)]
-            for p, l in zip(preds, labels):
-                y, yh = l[..., t], p[..., t]
+            for p, lb in zip(preds, labels):
+                y, yh = lb[..., t], p[..., t]
                 for cc in range(C):
                     m = np.isfinite(y[cc])
                     if m.sum() < 10:

@@ -1,6 +1,7 @@
 """Calibrate a checkpoint's predicted uncertainties by temperature scaling.
 
-    pixi run python -u -m cer_transfer.analysis.calibrate --checkpoint cer_ckpts/nstx_passive_ft.pt \
+    pixi run python -u -m cer_transfer.analysis.calibrate \
+        --checkpoint cer_ckpts/nstx_passive_ft.pt \
         --list splits/nstx_passive_val.txt [--limit 400] [--per-chord]
 
 For each target, finds the scalar temperature k that makes the model's
@@ -62,9 +63,9 @@ def main():
     model.load_state_dict(ckpt["model_state"])
     stats = {k: v.to(args.device) for k, v in ckpt["norm_stats"].items()}
     files = [
-        data_path(l.strip())  # relative entries resolve against CER_DATA_ROOT
-        for l in args.list.read_text().splitlines()
-        if l.strip().endswith(".joblib") and not l.strip().startswith("#")
+        data_path(ln.strip())  # relative entries resolve against CER_DATA_ROOT
+        for ln in args.list.read_text().splitlines()
+        if ln.strip().endswith(".joblib") and not ln.strip().startswith("#")
     ]
     if args.limit:
         files = files[: args.limit]
@@ -114,7 +115,7 @@ def main():
     MED = 0.6745  # median of |N(0,1)|
 
     def temperature(r, sp, sl):
-        """k s.t. median |r| / sqrt((k sp)^2 + sl^2) = MED, by bisection."""
+        """K s.t. median |r| / sqrt((k sp)^2 + sl^2) = MED, by bisection."""
         lo, hi = 1e-3, 1e3
         for _ in range(60):
             k = np.sqrt(lo * hi)

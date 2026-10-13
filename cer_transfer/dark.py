@@ -22,7 +22,7 @@ def dark_mask(
     k: float = 3.0,
     pre_only: bool = True,
 ) -> np.ndarray:
-    """spec (C, T, W) raw counts; target (C, T, n_t) with NaN where
+    """Spec (C, T, W) raw counts; target (C, T, n_t) with NaN where
     unlabeled. Returns (T,) bool.
 
     pre_only (default): dark frames are claimed ONLY before the first
@@ -38,7 +38,8 @@ def dark_mask(
     amplitude test cannot exclude it -- the guard must span the typical
     breakdown-to-first-beam delay. Measured on the validation set, the
     quiet test alone runs up to the guard edge in >= half the shots,
-    i.e. the guard, not the threshold, is the operative protection."""
+    i.e. the guard, not the threshold, is the operative protection.
+    """
     T = spec.shape[1]
     labeled_t = np.isfinite(target[..., 0]).any(axis=0)
     if not labeled_t.any():

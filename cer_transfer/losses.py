@@ -28,7 +28,8 @@ class MaskedGaussianNLL(nn.Module):
         """label_sigma (same normalized units as target), if given, enters as
         total variance = sigma^2 + label_sigma^2: the model's sigma then
         estimates the RESIDUAL uncertainty, and fitting label noise is no
-        longer rewarded. Invalid label sigmas (NaN/<=0) contribute 0."""
+        longer rewarded. Invalid label sigmas (NaN/<=0) contribute 0.
+        """
         mask = ~torch.isnan(target)
         if not mask.any():
             return mu.new_tensor(0.0, requires_grad=True)
@@ -54,6 +55,7 @@ class MaskedR2Score(R2Score):
         ----------
         input, target : Tensor
             Predictions and labels of the same shape.
+
         """
         mask = ~torch.isnan(target)
         if mask.any():
@@ -79,6 +81,7 @@ class MaskedRMSE:
         ----------
         input, target : Tensor
             Predictions and labels of the same shape.
+
         """
         mask = ~torch.isnan(target)
         if mask.any():

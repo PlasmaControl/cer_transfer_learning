@@ -37,6 +37,7 @@ def load_predictions(path) -> SimpleNamespace:
     SimpleNamespace
         ``C``, ``T``, and the arrays ``y``, ``pred``, ``sigma``,
         ``pred_sigma`` reshaped to (C, T, targets); ``targets`` if stored.
+
     """
     d = np.load(path)
     chord = d["chord"]
@@ -65,6 +66,7 @@ def frame_times(T: int, fs: float = FRAME_HZ, t_offset: float = 0.0) -> np.ndarr
     Returns
     -------
     ndarray of shape (T,)
+
     """
     return np.arange(T) / fs + t_offset
 
@@ -82,6 +84,7 @@ def frame_of(t: float, fs: float = FRAME_HZ, t_offset: float = 0.0) -> int:
     Returns
     -------
     int
+
     """
     return int(round((t - t_offset) * fs))
 
@@ -104,6 +107,7 @@ def chord_coordinate(C: int, csv_path=None, label: str | None = None):
         Coordinate per chord (NaN for chords not listed), or the chord index
         without a CSV.
     label : str
+
     """
     if csv_path is None:
         return np.arange(C, dtype=float), "chord (core -> edge)"
@@ -128,6 +132,7 @@ def sorted_chords(x: np.ndarray):
         Chord indices with finite coordinate, sorted by it.
     xs : ndarray
         The corresponding coordinates.
+
     """
     order = [i for i in np.argsort(x) if np.isfinite(x[i])]
     return order, x[order]
@@ -144,6 +149,7 @@ def runs(mask: np.ndarray):
     -------
     list of (first, last)
         Inclusive index ranges.
+
     """
     out, a = [], None
     for i, flag in enumerate(list(mask) + [False]):
@@ -169,6 +175,7 @@ def coordinate_spans(xs: np.ndarray, mask: np.ndarray):
     -------
     list of (lo, hi)
         Half a step beyond the run's end points.
+
     """
     dx = np.diff(xs)
     step = float(np.median(dx)) if dx.size else 0.5
@@ -194,6 +201,7 @@ def fitted_frames(y: np.ndarray, f0: int, f1: int, min_fits: int = 5):
     Returns
     -------
     list of int
+
     """
     return [
         f
@@ -214,6 +222,7 @@ def write_coordinate_csv(path, x: np.ndarray):
     Returns
     -------
     Path
+
     """
     with open(path, "w", newline="") as fh:
         w = csv.writer(fh)

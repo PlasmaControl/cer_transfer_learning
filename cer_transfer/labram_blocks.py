@@ -189,7 +189,7 @@ class Block(nn.Module):
             self.gamma_1, self.gamma_2 = None, None
 
     def forward(self, x):
-        """x + attn(norm(x)), then x + mlp(norm(x)), with optional layer scale."""
+        """X + attn(norm(x)), then x + mlp(norm(x)), with optional layer scale."""
         if self.gamma_1 is None:
             x = x + self.drop_path(self.attn(self.norm1(x)))
             x = x + self.drop_path(self.mlp(self.norm2(x)))

@@ -33,7 +33,8 @@ from cer_transfer.training import Trainer, load_checkpoint, set_random_seed
 def resolve_files(dir_or_none, list_or_none, machine_dir, what):
     """A split is either a directory glob or an explicit file list (one path
     per line, relative to CER_DATA_ROOT or absolute; '#' comments allowed).
-    Lists win over dirs."""
+    Lists win over dirs.
+    """
     if list_or_none is not None:
         lines = Path(list_or_none).read_text().splitlines()
         files = [
@@ -53,7 +54,8 @@ def resolve_files(dir_or_none, list_or_none, machine_dir, what):
                 else f" (CER_DATA_ROOT={root})"
             )
             raise FileNotFoundError(
-                f"{what} list {list_or_none}: {len(missing)} of {len(files)} files missing, "
+                f"{what} list {list_or_none}: "
+                f"{len(missing)} of {len(files)} files missing, "
                 f"e.g. {missing[0]}{hint}"
             )
         return files

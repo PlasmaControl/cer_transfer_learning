@@ -22,6 +22,7 @@ class CSVLogger:
     ----------
     path : Path
         CSV file; created on the first ``log`` call.
+
     """
 
     def __init__(self, path: Path):
@@ -39,6 +40,7 @@ class CSVLogger:
         ----------
         row : dict
             Column name -> value; the first call fixes the columns.
+
         """
         row = {**row, "wall_time": f"{time.time():.0f}"}
         mode = "a"
@@ -64,6 +66,7 @@ class TensorBoardLogger:
     Parameters
     ----------
     logdir : Path
+
     """
 
     def __init__(self, logdir: Path):
@@ -77,6 +80,7 @@ class TensorBoardLogger:
         Parameters
         ----------
         row : dict
+
         """
         step = int(row.get("epoch", 0))
         for k, v in row.items():
