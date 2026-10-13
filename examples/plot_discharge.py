@@ -19,7 +19,11 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
+
+# run as a file (python examples/plot_discharge.py): make the repository importable
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import matplotlib
 
