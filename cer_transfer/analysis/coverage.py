@@ -1,5 +1,6 @@
-"""Empirical coverage of the 1-sigma and 2-sigma intervals (Table S6):
-raw (k = 1) and calibrated (fitted k), on all labels and on consistent
+r"""Empirical coverage of the 1-sigma and 2-sigma intervals.
+
+Table S6: raw (k = 1) and calibrated (fitted k), on all labels and on consistent
 labels.
 
 z = (y - mu) / sqrt((k * sigma_model)^2 + sigma_label^2), as in the

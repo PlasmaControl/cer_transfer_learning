@@ -55,6 +55,7 @@ class AugmentationPipeline(nn.Module):
         Parameters
         ----------
         spec : Tensor of shape (B, C, T, W)
+            Batch of preprocessed spectrograms.
 
         Returns
         -------

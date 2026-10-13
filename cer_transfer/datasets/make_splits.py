@@ -1,5 +1,7 @@
-"""Create stratified, reproducible shot-level train/val/test splits plus
-nested scaling-curve subsets, written as explicit file lists.
+r"""Create stratified, reproducible discharge-level splits.
+
+Train/val/test splits plus nested scaling-curve subsets, written as
+explicit file lists.
 
     pixi run python -u -m cer_transfer.datasets.make_splits --machine nstxu \
         --dir /path/to/nstxu_labeled --out splits \

@@ -1,5 +1,7 @@
-"""Evaluate a checkpoint on a file list: overall, per-chord, and
-per-|vtor|-bin metrics. The diagnostic for WHERE performance is lost.
+r"""Evaluate a checkpoint on a file list.
+
+Overall, per-chord, and per-|vtor|-bin metrics. The diagnostic for WHERE
+performance is lost.
 
     pixi run python -u eval_checkpoint.py \
         --checkpoint cer_ckpts/nstx_scratch.pt \

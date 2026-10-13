@@ -1,4 +1,4 @@
-"""Rebuild the wavelength axis (nm) of preprocessed discharge files.
+r"""Rebuild the wavelength axis (nm) of preprocessed discharge files.
 
 The DIII-D joblib files store spectra on a per-shot master wavelength axis
 but not the axis itself. The preprocessing (preprocess_cer_spectrograms.ipynb)
@@ -14,8 +14,8 @@ so the orientation follows from their order. ``match`` is False when the
 rebuilt bin count differs from the joblib's (e.g. a shot processed with a
 different axis construction); such rows must not be used.
 
-    pixi run python -m cer_transfer.datasets.wavelength_axes \\
-        --list splits/d3d_val.txt --raw-dir /scratch/gpfs/EKOLEMEN/ps9551/cer_spectra \\
+    pixi run python -m cer_transfer.datasets.wavelength_axes \
+        --list splits/d3d_val.txt --raw-dir /scratch/gpfs/EKOLEMEN/ps9551/cer_spectra \
         --out data/d3d_wavelength_axes.csv
 """
 

@@ -1,11 +1,13 @@
-"""3D waterfall of an event: the model profile for every frame in the
-window (x: coordinate across the lines of sight, y: time, z: quantity),
-with the conventional fits as black dots at their own times.
+r"""3D waterfall figure of an event.
+
+The model profile for every frame in the window (x: coordinate across the lines
+of sight, y: time, z: quantity), with the conventional fits as black dots at
+their own times.
 
     pixi run python -u -m cer_transfer.figures.event_3d --preds gallery/e116939.npz \
         --t0 0.340 --t1 0.435 --t-offset -0.235 --target vtor \
-        --profile-x figs/chords_Rtan_116939.csv \\
-        --profile-xlabel '$R_\\mathrm{tan}$ (m)' \
+        --profile-x figs/chords_Rtan_116939.csv \
+        --profile-xlabel '$R_\mathrm{tan}$ (m)' \
         --out figs --out-name event_ntv_116939
 """
 

@@ -1,5 +1,6 @@
-"""Dark-frame criterion shared by training (zero_dark_frames) and the
-confidence check. A frame is DARK only if:
+"""Dark-frame criterion shared by training and the confidence check.
+
+Used by training (zero_dark_frames). A frame is DARK only if:
   1. it lies BEFORE the labeled span (t < first_label - guard) by
      default; post-span frames are excluded because decaying ramp-down
      plasma is too dim to separate safely (pre_only=False restores
@@ -22,7 +23,9 @@ def dark_mask(
     k: float = 3.0,
     pre_only: bool = True,
 ) -> np.ndarray:
-    """Spec (C, T, W) raw counts; target (C, T, n_t) with NaN where
+    """Return the dark-frame mask of one discharge.
+
+    Spec (C, T, W) raw counts; target (C, T, n_t) with NaN where
     unlabeled. Returns (T,) bool.
 
     pre_only (default): dark frames are claimed ONLY before the first

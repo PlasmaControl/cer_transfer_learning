@@ -52,10 +52,13 @@ def save_checkpoint(
     path : Path
         Destination file.
     model : CERModel
+        Model whose weights are saved.
     norm_stats : dict of str -> Tensor
         Target normalization statistics used in training.
     machine : MachineConfig
+        Machine the model was trained for.
     model_config : ModelConfig
+        Architecture settings, needed to rebuild the model.
     best_score : float
         Validation score of the saved weights.
     epoch : int
@@ -87,7 +90,9 @@ def load_checkpoint(path: Path, map_location="cpu") -> dict:
     Parameters
     ----------
     path : Path
+        Checkpoint file.
     map_location : str, default='cpu'
+        Torch device the tensors are loaded onto.
 
     Returns
     -------
@@ -101,7 +106,9 @@ def load_checkpoint(path: Path, map_location="cpu") -> dict:
 
 
 def mark_finished(path: Path, reason: str) -> None:
-    """Record in an existing checkpoint that its run completed (early stop or
+    """Mark a checkpoint as finished.
+
+    Record in an existing checkpoint that its run completed (early stop or
     epoch limit). --resume then refuses to continue it unless forced.
     """
     if path is None or not Path(path).exists():
@@ -141,7 +148,7 @@ class EarlyStopping:
         self.improved = False
 
     def step(self, score: float) -> bool:
-        """Returns True if this score is a new best."""
+        """Return True if this score is a new best."""
         if score is None or (isinstance(score, float) and math.isnan(score)):
             self.improved = False
             self.counter += 1
@@ -172,7 +179,9 @@ class EarlyStopping:
 
 
 def compute_norm_stats_per_chord(dataset, targets):
-    """Per-chord mean/std of each target over the dataset (canonical units).
+    """Compute per-chord normalization statistics of the targets.
+
+    Per-chord mean/std of each target over the dataset (canonical units).
     Returns {"mean": (C, n_t), "std": (C, n_t)} float32 tensors. NaN labels
     ignored; chords with <100 labeled points fall back to global stats.
     """
@@ -540,6 +549,7 @@ class Trainer:
         Parameters
         ----------
         loader : DataLoader
+            Validation data, one full discharge per batch.
 
         Returns
         -------
@@ -596,7 +606,9 @@ class Trainer:
         report_fn: Optional[Callable[[dict], None]] = None,
         final: bool = True,
     ) -> float:
-        """Train until early stopping or the epoch limit. With ``final`` the
+        """Run the training loop.
+
+        Train until early stopping or the epoch limit. With ``final`` the
         checkpoint is marked finished afterwards (not for a probe phase that
         is followed by further training).
         """
@@ -696,7 +708,9 @@ class Trainer:
 
 
 def set_random_seed(seed: int, deterministic: bool = False) -> None:
-    """Seed RNGs. deterministic=True additionally forces deterministic cuDNN
+    """Seed all random number generators.
+
+    Seed RNGs. deterministic=True additionally forces deterministic cuDNN
     kernels — bitwise reproducibility at a substantial per-batch GPU cost
     (deterministic conv algorithms are often 1.5-3x slower). The original
     training script never enabled this (it seeded nothing); default False

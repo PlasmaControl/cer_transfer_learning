@@ -79,7 +79,9 @@ def frame_of(t: float, fs: float = FRAME_HZ, t_offset: float = 0.0) -> int:
     t : float
         Time (s).
     fs : float, default=200
+        Frame rate (Hz).
     t_offset : float, default=0.0
+        Time (s) of frame 0.
 
     Returns
     -------
@@ -125,6 +127,7 @@ def sorted_chords(x: np.ndarray):
     Parameters
     ----------
     x : ndarray of shape (C,)
+        Coordinate per chord; NaN for chords without one.
 
     Returns
     -------
@@ -144,6 +147,7 @@ def runs(mask: np.ndarray):
     Parameters
     ----------
     mask : ndarray of bool
+        One-dimensional mask.
 
     Returns
     -------
@@ -197,6 +201,7 @@ def fitted_frames(y: np.ndarray, f0: int, f1: int, min_fits: int = 5):
     f0, f1 : int
         Inclusive frame range.
     min_fits : int, default=5
+        Minimum number of chords with a fit for a frame to count.
 
     Returns
     -------
@@ -216,8 +221,9 @@ def write_coordinate_csv(path, x: np.ndarray):
     Parameters
     ----------
     path : str or Path
+        Output file.
     x : ndarray of shape (C,)
-        NaN entries are skipped.
+        Coordinate per chord; NaN entries are skipped.
 
     Returns
     -------

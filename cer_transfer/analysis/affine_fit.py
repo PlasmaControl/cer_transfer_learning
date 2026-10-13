@@ -1,13 +1,14 @@
-"""Affine diagnostic of a prediction dump: how much of the error is a scale
-and offset per target (expected for zero-shot transfer between
-spectrometers), and how much remains after that correction.
+r"""Affine diagnostic of a prediction dump.
+
+How much of the error is a scale and offset per target (expected for zero-shot
+transfer between spectrometers), and how much remains after that correction.
 
 For each target, fit ``y = a * pred + b`` to the finite labels (least
 squares, with a 5-95 % quantile clip of the prediction range to limit the
 influence of failed fits) and report R2 and RMSE before and after the
 correction, plus the fitted ``a`` and ``b``.
 
-    pixi run python -u -m cer_transfer.analysis.affine_fit \\
+    pixi run python -u -m cer_transfer.analysis.affine_fit \
         --preds gallery/nstx_val_zero_shot.npz [--plot figs/affine_zero_shot]
 """
 

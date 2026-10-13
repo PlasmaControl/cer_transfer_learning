@@ -31,7 +31,9 @@ from cer_transfer.training import Trainer, load_checkpoint, set_random_seed
 
 
 def resolve_files(dir_or_none, list_or_none, machine_dir, what):
-    """A split is either a directory glob or an explicit file list (one path
+    """Resolve the files of one split.
+
+    A split is either a directory glob or an explicit file list (one path
     per line, relative to CER_DATA_ROOT or absolute; '#' comments allowed).
     Lists win over dirs.
     """

@@ -22,7 +22,9 @@ from .configs import MachineConfig
 
 
 class Preprocessor:
-    """Shared spectrogram preprocessing, matching the original pipeline:
+    """Preprocess spectrograms as in the original pipeline.
+
+    Steps:
 
       1. offset removal: per-channel minimum over the WHOLE subsequence
          (axes T and W together) — i.e. `x -= x.min(axis=(1, 2)) - 1`.
@@ -102,7 +104,9 @@ class Preprocessor:
 
 
 class ShotDataset(Dataset):
-    """One joblib file per shot with keys 'input' (C, T, W), 'target'
+    """Dataset of discharge files split into subsequences.
+
+    One joblib file per shot with keys 'input' (C, T, W), 'target'
     (C, T, n_targets), 'target_error' (same), 'end_index' (valid T).
 
     Splits each shot into non-overlapping subsequences of length subseq_len
@@ -124,7 +128,9 @@ class ShotDataset(Dataset):
         mirror_p: float = 0.0,
         stretch_aug: Optional[tuple] = None,
     ):
-        """mmap=True: memory-map files, materialize slices via page faults
+        """Index the discharge files of one split.
+
+        mmap=True: memory-map files, materialize slices via page faults
         (random small reads — latency-bound on GPFS). mmap=False: read each
         shot's file sequentially in full on first access (the pattern GPFS
         prefers), keep only the most recent shot per worker (batches are
@@ -403,7 +409,9 @@ def worker_init_fn(worker_id: int) -> None:
 
 
 def compute_tail_weights(dataset, gamma: float, quantile: float = 0.90) -> dict:
-    """{f_idx: weight} with weight = (q_shot / median_q)^gamma, where q_shot
+    """Compute per-discharge sampling weights from the rotation tail.
+
+    {f_idx: weight} with weight = (q_shot / median_q)^gamma, where q_shot
     is the per-shot `quantile` of |vtor| labels (canonical km/s). gamma=0 ->
     uniform. Cheap pass: reads target arrays only.
     """
@@ -432,7 +440,9 @@ def compute_tail_weights(dataset, gamma: float, quantile: float = 0.90) -> dict:
 
 
 class PerShotBatchSampler(Sampler):
-    """Batches of subsequences drawn from a single shot; shot order and
+    """Batch sampler that draws each batch from a single discharge.
+
+    Batches of subsequences drawn from a single shot; shot order and
     within-shot order shuffled each epoch (seedable via a torch.Generator
     for reproducible HPO).
     """
@@ -444,7 +454,9 @@ class PerShotBatchSampler(Sampler):
         generator: Optional[torch.Generator] = None,
         shot_weights: Optional[dict] = None,
     ):
-        """shot_weights: optional {f_idx: weight}; when given, each epoch
+        """Set up the sampler.
+
+        shot_weights: optional {f_idx: weight}; when given, each epoch
         draws len(file_list) shots WITH replacement, probability
         proportional to weight (tail oversampling for imbalanced
         regression). Epoch length is preserved in expectation.

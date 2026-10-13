@@ -25,7 +25,9 @@ class MaskedGaussianNLL(nn.Module):
         target: torch.Tensor,
         label_sigma: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """label_sigma (same normalized units as target), if given, enters as
+        """Compute the masked Gaussian negative log-likelihood.
+
+        label_sigma (same normalized units as target), if given, enters as
         total variance = sigma^2 + label_sigma^2: the model's sigma then
         estimates the RESIDUAL uncertainty, and fitting label noise is no
         longer rewarded. Invalid label sigmas (NaN/<=0) contribute 0.

@@ -108,6 +108,7 @@ class NanStopper(tune.Stopper):
         self.metric = metric
 
     def __call__(self, trial_id, result):
+        """Return True if the trial should be stopped."""
         import math
 
         v = result.get(self.metric)

@@ -80,6 +80,7 @@ class TensorBoardLogger:
         Parameters
         ----------
         row : dict
+            Metric name to value; must contain ``epoch``.
 
         """
         step = int(row.get("epoch", 0))

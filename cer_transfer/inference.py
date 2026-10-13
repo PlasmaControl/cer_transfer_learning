@@ -30,7 +30,9 @@ def load_model(
     Parameters
     ----------
     checkpoint : str or Path
+        Checkpoint written by training or fine-tuning.
     device : str, default='cpu'
+        Torch device for inference.
     machine : str, optional
         Apply the model to another machine's data (agnostic checkpoints only).
 
@@ -110,7 +112,10 @@ def export_inference_checkpoint(src, dst) -> Path:
 
     Parameters
     ----------
-    src, dst : str or Path
+    src : str or Path
+        Training checkpoint.
+    dst : str or Path
+        Output file (weights, configuration and normalization only).
 
     Returns
     -------

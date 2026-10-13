@@ -1,5 +1,6 @@
-"""Estimate label-noise ceilings on R2 for a split: pooled, per-chord, and
-|vtor|-binned.
+r"""Estimate label-noise ceilings on R2 for a split.
+
+Pooled, per-chord, and |vtor|-binned.
 
     pixi run python -u -m cer_transfer.analysis.ceiling_check --machine nstx \
         --list splits/nstx_val.txt [--per-chord] [--vtor-bins 5] [--limit N]

@@ -81,6 +81,7 @@ class ResidualBlock(nn.Module):
         Parameters
         ----------
         x : Tensor of shape (B, C_in, T, W)
+            Input feature map.
 
         Returns
         -------
@@ -275,7 +276,9 @@ class Backbone(nn.Module):
         return shared, tok
 
     def param_groups(self):
-        """(early, late) parameter lists for discriminative fine-tuning.
+        """Return parameter groups for discriminative fine-tuning.
+
+        (early, late) parameter lists for discriminative fine-tuning.
         In stem/trunk mode the stem is EXCLUDED from both (it is fresh per
         machine and should train at head-level LR; see stem_parameters).
         """
@@ -415,7 +418,9 @@ class SharedTrunkHead(nn.Module):
 
 
 class FullChordHead(nn.Module):
-    """Per-chord ResidualBlock + MLP on backbone features (old CERProcessor
+    """Head with a separate ResNet block and MLP for every chord.
+
+    Per-chord ResidualBlock + MLP on backbone features (old CERProcessor
     behavior). Maximum per-chord capacity; ~n_chords x the parameters of the
     shared-trunk variants. Empirically strongest on DIII-D (R2 0.7 -> 0.98
     vs a single shared head), but a fresh instance is expensive to fit on
@@ -461,6 +466,7 @@ class FullChordHead(nn.Module):
         Parameters
         ----------
         x : Tensor of shape (B, F, T, hidden_dim)
+            Backbone features.
 
         Returns
         -------
@@ -481,9 +487,11 @@ def build_head(
     Parameters
     ----------
     machine : MachineConfig
+        Machine the head predicts for (chord count, targets).
     n_backbone_channels : int
         Feature channels produced by the backbone.
     cfg : ModelConfig
+        Architecture settings.
 
     Returns
     -------
@@ -524,6 +532,7 @@ class CERModel(nn.Module):
         Parameters
         ----------
         x : Tensor of shape (B, C_in, T, W)
+            Preprocessed spectrograms of all chords.
         moments : Tensor, optional
             Per-chord line moments (see ``SharedTrunkHead``).
 
@@ -545,7 +554,9 @@ def build_model(machine: MachineConfig, cfg: ModelConfig) -> CERModel:
     Parameters
     ----------
     machine : MachineConfig
+        Machine the model is built for (chords, wavelength convention).
     cfg : ModelConfig
+        Architecture settings.
 
     Returns
     -------
@@ -637,7 +648,9 @@ def transfer_full_head(
     source_head_state: dict,
     reset_norm_running_stats: bool = True,
 ) -> None:
-    """Warm-start the ENTIRE head (shared trunk + all per-chord readouts)
+    """Warm-start the entire head from a source machine.
+
+    Warm-start the ENTIRE head (shared trunk + all per-chord readouts)
     from a source machine. Requires identical head architecture and chord
     count (e.g. NSTX -> NSTX-U, 51/51). Geometry shifts between machines are
     handled by fine-tuning, not by re-initialization.
@@ -661,7 +674,9 @@ def transfer_head_trunk(
     source_head_state: dict,
     reset_norm_running_stats: bool = True,
 ) -> None:
-    """Load the shared trunk of a SharedTrunkHead (trunk_conv + trunk_mlp)
+    """Load the shared trunk of a head from a source machine.
+
+    Load the shared trunk of a SharedTrunkHead (trunk_conv + trunk_mlp)
     from a source machine; per-chord readouts stay fresh. Valid because the
     head trunk's input width is the backbone's fixed feature width.
     """
