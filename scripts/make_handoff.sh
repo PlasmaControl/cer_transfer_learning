@@ -77,7 +77,16 @@ pixi run --frozen python -u eval_checkpoint.py --checkpoint ../models/d3d_fixed_
 pixi run --frozen python -u eval_checkpoint.py --checkpoint ../models/d3d_fixed_plain_best.pt \
     --list ../lists/d3d_demo.txt 2>&1 | grep -E "checkpoint:|overall"
 
-# profiles and time traces of one discharge (notebook)
+# FIGURES: time traces and profiles of one discharge -> PNG
+pixi run --frozen python examples/plot_discharge.py --checkpoint ../models/nstx_fixed_ft_rfull.pt \
+    --shot nstx/chers_137711.joblib --profile-x ../data/chords_Rtan_137711.csv --out nstx_137711.png
+pixi run --frozen python examples/plot_discharge.py --checkpoint ../models/d3d_fixed_plain_best.pt \
+    --machine nstx --shot nstx/chers_116939.joblib --profile-x ../data/chords_Rtan_116939.csv \
+    --out nstx_116939_zero_shot.png                      # DIII-D model on NSTX, no NSTX training
+pixi run --frozen python examples/plot_discharge.py --checkpoint ../models/d3d_fixed_plain_best.pt \
+    --shot $(head -1 ../lists/d3d_demo.txt) --chords 5 20 --out d3d_example.png
+
+# interactive: the notebook
 pixi run jupyter lab notebooks/demo.ipynb
 ```
 
