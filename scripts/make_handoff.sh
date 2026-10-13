@@ -13,8 +13,10 @@
 #   data/chords_Rtan_*.csv   chord tangency radii for the profile plots
 #   lists/                   nstx_demo.txt, d3d_demo.txt (paths relative to data/)
 #   QUICKSTART.md
-set -euo pipefail
+set -eu
+trap 'echo "make_handoff.sh: failed at line $LINENO" >&2' ERR
 cd "$(dirname "$0")/.."
+[ -f .env.fixed ] || { echo "missing .env.fixed (data root of the rebuilt DIII-D files)" >&2; exit 1; }
 source .env.fixed   # DIII-D examples come from the rebuilt files
 
 STAMP=$(date +%Y%m%d)
@@ -22,7 +24,13 @@ OUT=${OUT:-$PWD/cer_handoff_$STAMP}
 NSTX_SRC=${NSTX_SRC:-/scratch/gpfs/EKOLEMEN/ps9551/chers_set5}
 # default DIII-D examples: the first three discharges of the rebuilt DIII-D test folder
 D3D_DIR=$CER_DATA_ROOT/test_set_30
-D3D_SHOTS=${D3D_SHOTS:-$(ls "$D3D_DIR" | grep -E '^[0-9]+\.joblib$' | head -3 | sed 's/\.joblib//' | tr '\n' ' ')}
+[ -d "$D3D_DIR" ] || { echo "no DIII-D folder $D3D_DIR" >&2; exit 1; }
+if [ -z "${D3D_SHOTS:-}" ]; then
+  D3D_SHOTS=$(find -L "$D3D_DIR" -maxdepth 1 -name '[0-9]*.joblib' -printf '%f\n' | sort | sed -n '1,3p' | sed 's/\.joblib$//' | tr '\n' ' ')
+fi
+echo "output:   $OUT.zip"
+echo "NSTX:     $NSTX_SRC"
+echo "DIII-D:   $D3D_DIR  ($D3D_SHOTS)"
 
 rm -rf "$OUT"; mkdir -p "$OUT"/{models,data/nstx,data/d3d,lists}
 
