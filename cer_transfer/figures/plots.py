@@ -282,8 +282,8 @@ def cmd_curves(args):
                 vs = pd.Series(v)
                 med = vs.rolling(9, center=True, min_periods=3).median().to_numpy()
                 run_best = vs.cummax().shift(1).fillna(vs.iloc[0]).to_numpy()
-                late = np.arange(v.size) >= 10  # early epochs climb from scratch; no "best so far" there
-                bad = (v < med - args.outlier_drop) | ((v < run_best - 1.5 * args.outlier_drop) & late)
+                late = np.arange(v.size) >= 10  # early epochs climb steeply: neither rule applies there
+                bad = ((v < med - args.outlier_drop) | (v < run_best - 1.5 * args.outlier_drop)) & late
                 if bad.any():
                     print(f"{label}: interpolated over collapsed epochs "
                           + ", ".join(f"{e} ({v[e]:.3f})" for e in np.where(bad)[0]))

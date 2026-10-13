@@ -53,7 +53,8 @@ def main():
         default=None,
         help="explicit times (s); the nearest fitted frames are used",
     )
-    p.add_argument("--target", choices=("ti", "vtor"), default="vtor")
+    p.add_argument("--target", choices=("ti", "vtor", "both"), default="vtor",
+                   help="both: a v_tor and a T_i profile row and trace, same times and chords")
     p.add_argument("--profile-x", type=Path, default=None)
     p.add_argument("--profile-xlabel", type=str, default=None)
     p.add_argument("--k", type=float, nargs=2, default=None)
@@ -101,26 +102,33 @@ def main():
 
     dmp = load_predictions(args.preds)
     C, T = dmp.C, dmp.T
-    k = 1 if args.target == "vtor" else 0
-    y = dmp.y[..., k]
-    sl = dmp.sigma[..., k]
-    mu = dmp.pred[..., k]
-    kk = 1.0 if args.k is None else args.k[k]
-    ps = dmp.pred_sigma[..., k] * kk if dmp.pred_sigma is not None else None
-
-    efit = None
-    if args.efit is not None:
-        ef = load(args.efit)
-        efit = {k: np.asarray(ef[k]) for k in ("time_s", "psirz", "rgrid", "zgrid", "psi_axis", "psi_bdry",
-                                                "r_axis", "z_axis", "rbbbs", "zbbbs", "nbbbs", "rlim", "zlim")}
-
-    mu2 = ps2 = None
+    tnames = {"vtor": [1], "ti": [0], "both": [1, 0]}[args.target]  # v_tor first
+    names = dmp.targets or ["ti", "vtor"]
+    D = {}
+    d2 = None
     if args.preds2 is not None:
         d2 = load_predictions(args.preds2)
         if (d2.C, d2.T) != (C, T):
             raise SystemExit("--preds2 must be a dump of the same discharge")
-        mu2 = d2.pred[..., k]
-        ps2 = d2.pred_sigma[..., k] * kk if d2.pred_sigma is not None else None
+    for k in tnames:
+        kk = 1.0 if args.k is None else args.k[k]
+        sc = 1.0 if k == 1 else 1e-3  # T_i displayed in keV
+        D[k] = dict(
+            y=dmp.y[..., k] * sc, sl=dmp.sigma[..., k] * sc, mu=dmp.pred[..., k] * sc,
+            ps=dmp.pred_sigma[..., k] * kk * sc if dmp.pred_sigma is not None else None,
+            mu2=d2.pred[..., k] * sc if d2 is not None else None,
+            ps2=(d2.pred_sigma[..., k] * kk * sc if d2 is not None and d2.pred_sigma is not None else None),
+            unit="$v_{tor}$ (km/s)" if k == 1 else "$T_i$ (keV)",
+        )
+    k0 = tnames[0]
+    y = D[k0]["y"]  # frame/chord selection from the first target (v_tor if drawn)
+    mu2 = D[k0]["mu2"]
+
+    efit = None
+    if args.efit is not None:
+        ef = load(args.efit)
+        efit = {kq: np.asarray(ef[kq]) for kq in ("time_s", "psirz", "rgrid", "zgrid", "psi_axis", "psi_bdry",
+                                                  "r_axis", "z_axis", "rbbbs", "zbbbs", "nbbbs", "rlim", "zlim")}
 
     xm, xlab = chord_coordinate(C, args.profile_x, args.profile_xlabel)
     order, xs = sorted_chords(xm)
@@ -154,16 +162,17 @@ def main():
         idx = np.linspace(0, len(fitted) - 1, args.n_times).round().astype(int)
         frames = [fitted[i] for i in idx]
 
-    # shared y-limits from curves and fits (not from the bands)
-    vals = np.concatenate([np.r_[mu[order, f], y[order, f]] for f in frames]
-                          + ([mu2[order, f] for f in frames] if mu2 is not None else []))
-    vals = vals[np.isfinite(vals)]
-    lo, hi = vals.min(), vals.max()
-    pad = 0.1 * max(hi - lo, 1e-6)
-    ylim = (lo - pad, hi + pad) if args.ylim is None else tuple(args.ylim)
+    # y-limits per target from curves and fits (not from the bands)
+    for k in tnames:
+        d = D[k]
+        vals = np.concatenate([np.r_[d["mu"][order, f], d["y"][order, f]] for f in frames]
+                              + ([d["mu2"][order, f] for f in frames] if d["mu2"] is not None else []))
+        vals = vals[np.isfinite(vals)]
+        lo, hi = vals.min(), vals.max()
+        pad = 0.1 * max(hi - lo, 1e-6)
+        d["ylim"] = (lo - pad, hi + pad) if (args.ylim is None or k != 1) else tuple(args.ylim)
     dx = np.diff(xs)
     step = float(np.median(dx)) if dx.size else 0.5
-    unit = "$v_{tor}$ (km/s)" if k else "$T_i$ (eV)"
 
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
@@ -179,26 +188,33 @@ def main():
                 r_lo, r_hi = float(efit["rlim"].min()) - 0.03, float(efit["rlim"].max()) + 0.03
                 z_lo, z_hi = (float(efit["zlim"].min()) - 0.03, float(efit["zlim"].max()) + 0.03) if zr is None else zr
                 eq_w = (r_hi - r_lo) / (z_hi - z_lo)  # width/height of the cross-section
-            hr = [1] + ([0.85] if trace else [])
+            nt = len(tnames)
+            hr = [1] * nt + (([0.85] if nt == 1 else [0.7] * nt) if trace else [])
             w_fig = PAPER_W if ctx == "paper" else 4 * n
-            base_h = 2.3 + (1.9 if trace else 0)
+            base_h = (2.3 + (1.9 if trace else 0)) if nt == 1 else (3.6 + (2.6 if trace else 0))
             size = (w_fig, base_h) if ctx == "paper" else (w_fig, base_h * 1.75)
             fig = plt.figure(figsize=size)
-            prof_h_in = (base_h if ctx == "paper" else base_h * 1.75) * 0.86 * hr[0] / sum(hr)  # approx row height
-            eq_col = (eq_w * prof_h_in / (w_fig * 0.9 / (n + 1))) * 1.4 if eq else 0.0  # width ratio of the equilibrium column (box + room for the neighbour's tick labels)
-            wr = ([eq_col] if eq else []) + [1] * n
-            gs = fig.add_gridspec(len(hr), len(wr), height_ratios=hr, width_ratios=wr, hspace=0.6, wspace=0.32)
-            r_prof = 0
-            c0 = 1 if eq else 0
-            row = []
-            for j in range(n):
-                row.append(fig.add_subplot(gs[0, c0 + j], sharey=row[0] if row else None))
-                if j:
-                    plt.setp(row[j].get_yticklabels(), visible=False)
-                row[j].set_xlim(*xlim_prof)
-            axes = [row]
+            prof_h_in = (size[1]) * 0.86 * nt / sum(hr)  # equilibrium spans all profile rows
+            eq_col = (eq_w * prof_h_in / (w_fig * 0.9 / (n + 1))) * (1.4 if nt == 1 else 0.85) if eq else 0.0
+            # separate grids: [equilibrium | spacer | profiles] on top, the trace(s) below
+            wr = ([eq_col, 0.42] if eq else []) + [1] * n  # spacer column: room for the profile y-label
+            outer = fig.add_gridspec(2 if trace else 1, 1, height_ratios=[nt, sum(hr[nt:])] if trace else [1],
+                                     hspace=0.45 if nt == 1 else 0.30)
+            gs_top = outer[0].subgridspec(nt, len(wr), width_ratios=wr, hspace=0.12, wspace=0.12)
+            gs_bot = outer[1].subgridspec(nt, 1, hspace=0.12) if trace else None
+            c0 = 2 if eq else 0
+            prow = {}
+            for r_, k in enumerate(tnames):
+                row = []
+                for j in range(n):
+                    row.append(fig.add_subplot(gs_top[r_, c0 + j], sharey=row[0] if row else None,
+                                               sharex=prow[tnames[0]][j] if r_ else None))
+                    if j:
+                        plt.setp(row[j].get_yticklabels(), visible=False)
+                    row[j].set_xlim(*xlim_prof)
+                prow[k] = row
             if eq:
-                axe = fig.add_subplot(gs[0, 0])
+                axe = fig.add_subplot(gs_top[0:nt, 0])
                 f = frames[0]
                 c_tr = order[int(np.argmin(np.abs(xs - args.trace_x)))] if trace else None
                 ie = int(np.argmin(np.abs(efit["time_s"] - tax[f])))
@@ -217,106 +233,89 @@ def main():
                 axe.set_xlim(r_lo, r_hi)
                 axe.set_ylim(z_lo, z_hi)
                 axe.set_aspect("equal", adjustable="box")
-                axe.set_anchor("W")  # free space of the column stays on the right, next to the profile axis
-                axe.set_zorder(row[0].get_zorder() - 1)  # the profile y-label may extend over this cell
+                axe.set_anchor("W")
+                axe.set_zorder(prow[tnames[0]][0].get_zorder() - 1)
                 axe.set_title("equilibrium at $t_0$" if not args.no_reference else
                               f"equilibrium, t = {efit['time_s'][ie]:.3f} s", fontsize="small")
                 axe.tick_params(labelsize="x-small")
                 axe.set_xlabel("$R$ (m)", fontsize="small")
                 axe.set_ylabel("$Z$ (m)", fontsize="small")
                 axe.set_xticks([0.5, 1.0, 1.5])
-            for j, (ax, f) in enumerate(zip(axes[0], frames)):
-                yy = y[order, f]
-                fitm = np.isfinite(yy)
-                # grey where no conventional fit exists
-                nf = ~fitm
-                a = None
-                for q, flag in enumerate(list(nf) + [False]):
-                    if flag and a is None:
-                        a = q
-                    if not flag and a is not None:
-                        lo_x = xs[a] - 0.5 * ((xs[a] - xs[a - 1]) if a > 0 else step)
-                        b = q - 1
-                        hi_x = xs[b] + 0.5 * (
-                            (xs[b + 1] - xs[b]) if b + 1 < len(xs) else step
-                        )
-                        ax.axvspan(lo_x, hi_x, color="0.9", zorder=0, lw=0)
-                        a = None
-                m_ = mu[order, f]
-                if ps is not None:
-                    s_ = ps[order, f]
-                    nof_ext = nf | np.r_[nf[1:], False] | np.r_[False, nf[:-1]]
-                    ax.fill_between(
-                        xs,
-                        m_ - s_,
-                        m_ + s_,
-                        where=~nf,
-                        color="C0",
-                        alpha=0.22,
-                        lw=0,
-                        zorder=1,
-                    )
-                    ax.fill_between(
-                        xs,
-                        m_ - s_,
-                        m_ + s_,
-                        where=nof_ext,
-                        color="C0",
-                        alpha=0.07,
-                        lw=0,
-                        zorder=1,
-                    )
-                if j > 0 and not args.no_reference:
-                    ax.plot(
-                        xs, mu[order, frames[0]], "--", color="0.55", lw=1.0, zorder=1.5
-                    )
-                ax.plot(xs, m_, "-", color="C0", lw=1.5, zorder=2)
-                if mu2 is not None:
-                    m2 = mu2[order, f]
-                    if ps2 is not None:
-                        s2 = ps2[order, f]
-                        ax.fill_between(xs, m2 - s2, m2 + s2, where=~nf, color="C1", alpha=0.15, lw=0, zorder=1)
-                    ax.plot(xs, m2, "-", color="C1", lw=1.3, zorder=2)
-                ax.errorbar(
-                    xs[fitm],
-                    yy[fitm],
-                    yerr=sl[order, f][fitm],
-                    fmt="o",
-                    ms=2.6,
-                    lw=0.6,
-                    color="k",
-                    ecolor="0.45",
-                    zorder=3,
-                )
-                ax.set_ylim(*ylim)
-                ax.set_xlim(xs[0] - 0.5 * step, xs[-1] + 0.5 * step)
-                tlabel = "$t_0$" if (j == 0 and not args.no_reference) else "t"
-                ax.set_title(f"{tlabel} = {tax[f]:.3f} s", fontsize="small")
-                ax.set_xlabel(xlab, fontsize="small")
-                if j == 0:
-                    ax.set_ylabel(unit)
+            for r_, k in enumerate(tnames):
+                d = D[k]
+                y_, sl_, mu_, ps_, mu2_, ps2_ = d["y"], d["sl"], d["mu"], d["ps"], d["mu2"], d["ps2"]
+                for j, (ax, f) in enumerate(zip(prow[k], frames)):
+                    yy = y_[order, f]
+                    fitm = np.isfinite(yy)
+                    nf = ~fitm
+                    a = None
+                    for q, flag in enumerate(list(nf) + [False]):
+                        if flag and a is None:
+                            a = q
+                        if not flag and a is not None:
+                            lo_x = xs[a] - 0.5 * ((xs[a] - xs[a - 1]) if a > 0 else step)
+                            b_ = q - 1
+                            hi_x = xs[b_] + 0.5 * ((xs[b_ + 1] - xs[b_]) if b_ + 1 < len(xs) else step)
+                            ax.axvspan(lo_x, hi_x, color="0.9", zorder=0, lw=0)
+                            a = None
+                    m_ = mu_[order, f]
+                    if ps_ is not None:
+                        s_ = ps_[order, f]
+                        nof_ext = nf | np.r_[nf[1:], False] | np.r_[False, nf[:-1]]
+                        ax.fill_between(xs, m_ - s_, m_ + s_, where=~nf, color="C0", alpha=0.22, lw=0, zorder=1)
+                        ax.fill_between(xs, m_ - s_, m_ + s_, where=nof_ext, color="C0", alpha=0.07, lw=0, zorder=1)
+                    if j > 0 and not args.no_reference:
+                        ax.plot(xs, mu_[order, frames[0]], "--", color="0.55", lw=1.0, zorder=1.5)
+                    ax.plot(xs, m_, "-", color="C0", lw=1.5, zorder=2)
+                    if mu2_ is not None:
+                        m2 = mu2_[order, f]
+                        if ps2_ is not None:
+                            s2 = ps2_[order, f]
+                            ax.fill_between(xs, m2 - s2, m2 + s2, where=~nf, color="C1", alpha=0.15, lw=0, zorder=1)
+                        ax.plot(xs, m2, "-", color="C1", lw=1.3, zorder=2)
+                    ax.errorbar(xs[fitm], yy[fitm], yerr=sl_[order, f][fitm], fmt="o", ms=2.6, lw=0.6,
+                                color="k", ecolor="0.45", zorder=3)
+                    ax.set_ylim(*d["ylim"])
+                    ax.set_xlim(xs[0] - 0.5 * step, xs[-1] + 0.5 * step)
+                    if r_ == 0:
+                        tlabel = "$t_0$" if (j == 0 and not args.no_reference) else "t"
+                        ax.set_title(f"{tlabel} = {tax[f]:.3f} s", fontsize="small")
+                    if r_ == nt - 1:
+                        ax.set_xlabel(xlab, fontsize="small")
+                    else:
+                        plt.setp(ax.get_xticklabels(), visible=False)
+                    if j == 0:
+                        ax.set_ylabel(d["unit"])
             if trace:
                 c = order[int(np.argmin(np.abs(xs - args.trace_x)))]
                 fr = np.arange(max(f0, 0), min(f1, T - 1) + 1)
                 tt = tax[fr]
-                axt = fig.add_subplot(gs[1, :])
-                for src_mu, src_ps, col, lw in ((mu, ps, "C0", 1.5), (mu2, ps2, "C1", 1.3)):
-                    if src_mu is None:
-                        continue
-                    m_t = src_mu[c, fr]
-                    if src_ps is not None:
-                        axt.fill_between(tt, m_t - src_ps[c, fr], m_t + src_ps[c, fr], color=col, alpha=0.2, lw=0)
-                    axt.plot(tt, m_t, "-", color=col, lw=lw, zorder=2)
-                    axt.plot(tt, m_t, "o", color=col, ms=2.2, zorder=2.5)  # one point per model output (every frame)
-                yt = y[c, fr]; fm = np.isfinite(yt)
-                axt.errorbar(tt[fm], yt[fm], yerr=sl[c, fr][fm], fmt="o", ms=2.6, lw=0.6, color="k",
-                             ecolor="0.45", zorder=3)
-                axt.set_xlim(tt[0], tt[-1])
-                axt.set_ylim(*ylim)
-                axt.set_xlabel("time (s)", fontsize="small")
-                axt.set_ylabel(unit)
-                axt.set_title(f"{xlab.split('(')[0].strip()} = {xm[c]:.2f} m, model every {1000 / FS:.0f} ms",
-                              fontsize="small")
+                ax_prev = None
+                for r_, k in enumerate(tnames):
+                    d = D[k]
+                    axt = fig.add_subplot(gs_bot[r_, 0], sharex=ax_prev)
+                    ax_prev = axt
+                    for src_mu, src_ps, col, lw in ((d["mu"], d["ps"], "C0", 1.5), (d["mu2"], d["ps2"], "C1", 1.3)):
+                        if src_mu is None:
+                            continue
+                        m_t = src_mu[c, fr]
+                        if src_ps is not None:
+                            axt.fill_between(tt, m_t - src_ps[c, fr], m_t + src_ps[c, fr], color=col, alpha=0.2, lw=0)
+                        axt.plot(tt, m_t, "-", color=col, lw=lw, zorder=2)
+                        axt.plot(tt, m_t, "o", color=col, ms=2.2, zorder=2.5)
+                    yt = d["y"][c, fr]; fm = np.isfinite(yt)
+                    axt.errorbar(tt[fm], yt[fm], yerr=d["sl"][c, fr][fm], fmt="o", ms=2.6, lw=0.6, color="k",
+                                 ecolor="0.45", zorder=3)
+                    axt.set_xlim(tt[0], tt[-1])
+                    axt.set_ylim(*d["ylim"])
+                    axt.set_ylabel(d["unit"])
+                    if r_ == 0:
+                        axt.set_title(f"{xlab.split('(')[0].strip()} = {xm[c]:.2f} m, model every {1000 / FS:.0f} ms",
+                                      fontsize="small")
+                    if r_ == nt - 1:
+                        axt.set_xlabel("time (s)", fontsize="small")
+                    else:
+                        plt.setp(axt.get_xticklabels(), visible=False)
             hh = [
                 Line2D([], [], color="C0", lw=1.5, marker="o", ms=3),
                 Patch(color="C0", alpha=0.3),
@@ -336,13 +335,14 @@ def main():
             if not args.no_reference:
                 hh.insert(1, Line2D([], [], color="0.55", ls="--", lw=1.0))
                 ll.insert(1, "model at $t_0$")
-            top = 0.92 if trace else 0.86
-            fig.tight_layout(rect=(0, 0, 1, top), h_pad=0.6)
+            ncol = len(hh) if sum(len(x) for x in ll) < 95 else (len(hh) + 1) // 2  # wrap when wider than the page
+            top = (0.93 if trace else 0.86) - (0.025 if ncol < len(hh) else 0.0)
+            fig.subplots_adjust(left=0.105, right=0.97, bottom=0.07 if nt > 1 else 0.10, top=top - 0.03)
             fig.legend(
                 hh,
                 ll,
                 loc="upper center",
-                ncol=len(hh),
+                ncol=ncol,
                 fontsize="x-small",
                 frameon=False,
                 bbox_to_anchor=(0.5, 1.0),

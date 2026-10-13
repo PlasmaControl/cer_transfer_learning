@@ -161,6 +161,13 @@ def main():
         assert len(d2["chord"]) == len(ch), "preds2 shape mismatch"
         pr2 = d2["pred"].reshape(C, T, -1)
     t_s = file_times(args.shot, T, 200.0, args.t_offset) if args.shot else np.arange(T) / 200.0 + args.t_offset
+    # display T_i in keV (index 0); frame selection below is unit-independent
+    y = y.astype(np.float64).copy(); sl = sl.astype(np.float64).copy(); pr = pr.astype(np.float64).copy()
+    y[..., 0] /= 1000.0; sl[..., 0] /= 1000.0; pr[..., 0] /= 1000.0
+    if ps is not None:
+        ps = ps.astype(np.float64).copy(); ps[..., 0] /= 1000.0
+    if pr2 is not None:
+        pr2 = pr2.astype(np.float64).copy(); pr2[..., 0] /= 1000.0
 
     lab_frac = np.isfinite(y[..., 0]).mean(axis=0)
     # well-labeled frame at PEAK plasma (max mean labeled Ti among the
@@ -391,7 +398,7 @@ def main():
                     framealpha=0.9,
                     handlelength=1.8,
                 )
-            trace_panel(axes[1, col], 0, "$T_i$ (eV)")
+            trace_panel(axes[1, col], 0, "$T_i$ (keV)")
 
             # profiles at fixed times, optionally in a physical coordinate
             xm, xlab = chord_coordinate(C, args.profile_x, args.profile_xlabel)
@@ -526,7 +533,7 @@ def main():
             profile_panel(ax, 1, "$v_{tor}$ (km/s)", legend=True, label_span=True)
             ax.set_title(f"profiles at t = {t_s[f_lab]:.3f} s", fontsize="medium")
             ax = axes[1, col + 1]
-            profile_panel(ax, 0, "$T_i$ (eV)", legend=False, label_span=False)
+            profile_panel(ax, 0, "$T_i$ (keV)", legend=False, label_span=False)
             ax.set_xlabel(xlab)
 
             t0 = (

@@ -25,3 +25,6 @@ slurm/logs/*
 .vscode/
 .idea/
 .DS_Store
+.env.fixed
+figs_trackA/
+slurm/logs/

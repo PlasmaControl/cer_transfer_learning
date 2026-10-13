@@ -84,13 +84,14 @@ event() {  # $1 preds  $2 t0  $3 t1  $4 shot  $5 out-name  $6 trace R (m)  [$7 z
         --no-band --min-fit-frac 0.8 ${7:+--zlim $7} --profile-x $R/chords_Rtan_$4.csv --profile-xlabel "$XL" \
         --out figs --out-name "$5"
   else
-    $RUN -m cer_transfer.figures.event_panels --preds "$1" --t0 $2 --t1 $3 --t-offset $OFF --target vtor ${9:-$K} \
+    $RUN -m cer_transfer.figures.event_panels --preds "$1" --t0 $2 --t1 $3 --t-offset $OFF --target ${EVENT_TARGET:-both} ${9:-$K} \
         --label1 "${10:-$NAME_FT_FULL}" ${11:---n-times 4} --trace-x $6 ${7:+--ylim $7} --min-fit-frac ${8:-0.5} ${SF:+--shot $SF} ${EF:+--efit $EF} \
         --profile-x $R/chords_Rtan_$4.csv --profile-xlabel "$XL" --out figs --out-name "$5"
   fi
 }
-T116939="--times 0.345 0.375 0.425"; T115600="--times 0.315 0.365 0.395"   # three profiles: before, during, after
-event gallery/e116939.npz 0.340 0.435 116939 event_ntv_116939 1.10 "" 0.5 "$K" "$NAME_FT_FULL" "$T116939"
+# three profiles: before, during, after the event, on the measured time axis (time_s)
+T116939="--times 0.376 0.406 0.426"; T115600="--times 0.315 0.365 0.395"
+event gallery/e116939.npz 0.370 0.445 116939 event_ntv_116939 1.10 "" 0.5 "$K" "$NAME_FT_FULL" "$T116939"
 event gallery/e115600.npz 0.315 0.400 115600 event_tm_115600 1.00 "" 0.7 "$K" "$NAME_FT_FULL" "$T115600"   # edge chords with few fits drop out
 
 # --- Alternative versions of Fig. 2 and the two events with the NSTX-only model
@@ -107,7 +108,7 @@ $RUN -m cer_transfer.figures.recon_composite --preds $H/scratch_full.npz \
     --shot "${CER_DATA_ROOT:-.}/$L137711" --label1 "NSTX (7307 shots) model" --t-offset $OFF --unl-gap 2 $KS \
     --profile-x $R/chords_Rtan_137711.csv --profile-xlabel "$XL" \
     --out figs --out-name recon_legacy_137711_scratch
-event gallery/e116939_scratch.npz 0.340 0.435 116939 event_ntv_116939_scratch 1.10 "" 0.5 "$KS" "NSTX (7307 shots) model" "$T116939"
+event gallery/e116939_scratch.npz 0.370 0.445 116939 event_ntv_116939_scratch 1.10 "" 0.5 "$KS" "NSTX (7307 shots) model" "$T116939"
 event gallery/e115600_scratch.npz 0.315 0.400 115600 event_tm_115600_scratch 1.00 "" 0.7 "$KS" "NSTX (7307 shots) model" "$T115600"
 
 # --- Transfer at 325 discharges: fine-tuned vs from scratch in ONE figure ------
@@ -117,14 +118,17 @@ have gallery/e116939_${FTP}_r325.npz gallery/e116939_nstx_agn_scratch_plain_r325
 $RUN -m cer_transfer.figures.event_panels --preds gallery/e116939_${FTP}_r325.npz \
     --preds2 gallery/e116939_nstx_agn_scratch_plain_r325.npz \
     --label1 "$NAME_FT_325" --label2 "$NAME_SCR_325" --no-reference \
-    --t0 0.340 --t1 0.435 --t-offset $OFF --target vtor $T116939 --trace-x 1.10 --ylim -10 270 $(SF=$(shotany 116939); echo ${SF:+--shot $SF}) \
+    --t0 0.370 --t1 0.445 --t-offset $OFF --target ${EVENT_TARGET:-both} $T116939 --trace-x 1.10 --ylim -10 270 $(SF=$(shotany 116939); echo ${SF:+--shot $SF}) \
     $(EF="${EFIT_DIR:-${CER_DATA_ROOT:-.}/chers_set5}/efit_116939.joblib"; [ -f "$EF" ] && echo "--efit $EF") \
     --profile-x $R/chords_Rtan_116939.csv --profile-xlabel "$XL" --out figs --out-name event_transfer_r325_116939
 
 # --- Beam-off examples: model on the regular spectra while the beam is off --
 # (phases found from the fits and line brightness of the same files; the model
 # runs directly, no stored dumps; BEAMOFF_CK selects the checkpoint)
-BO_CK=${BEAMOFF_CK:-cer_ckpts/d3d_full_dg.pt}   # zero-shot: DIII-D model on NSTX
+# ONE choice of the DIII-D model for this figure, the same in make_figs.sh and make_paper.sh:
+# BEAMOFF_CK if set, else D3D (the build's DIII-D model), else the paper's model. Printed below.
+BO_CK=${BEAMOFF_CK:-${D3D:-cer_ckpts/d3d_fixed_plain_best.pt}}
+echo "beam-off figure: DIII-D model = $BO_CK"
 # a DIII-D checkpoint must be applied with the NSTX preprocessing (the files
 # are NSTX): without --machine, load_model uses the checkpoint's machine and
 # the DIII-D flip/stretch would invert the rotation sign; the calibration

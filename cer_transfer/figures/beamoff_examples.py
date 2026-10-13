@@ -185,7 +185,8 @@ def main():
     if args.checkpoint2 is not None:
         m2 = load_model(args.checkpoint2, machine=args.machine2)
         res2 = [predict_file(m2, e) for _, e, _ in chosen]
-    unit = "$v_{tor}$ (km/s)" if k else "$T_i$ (eV)"
+    unit = "$v_{tor}$ (km/s)" if k else "$T_i$ (keV)"
+    tsc = 1.0 if k else 1e-3  # T_i displayed in keV
     n = len(chosen)
     args.out.mkdir(parents=True, exist_ok=True)
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
@@ -206,9 +207,9 @@ def main():
             if has_nbi:
                 axes.append([fig.add_subplot(gs[1, j], sharex=axes[0][j]) for j in range(n)])
             for i, (ax, (dur, e, (a, b)), r) in enumerate(zip(axes[0], chosen, res)):
-                pr = r.pred[args.chord, :, k]
-                ps = r.pred_sigma[args.chord, :, k] * args.k[k]
-                y = r.y[args.chord, :, k]
+                pr = r.pred[args.chord, :, k] * tsc
+                ps = r.pred_sigma[args.chord, :, k] * args.k[k] * tsc
+                y = r.y[args.chord, :, k] * tsc
                 T = pr.shape[0]
                 t = file_times(e, T, args.fs, args.t_offset)  # time_s from the file when present
                 mb = args.margin_before or [args.margin]
@@ -228,12 +229,12 @@ def main():
                 )
                 ax.plot(t[w], pr[w], "-", color="C0", lw=1.5, label=args.label, marker="o", ms=2.2)  # one marker per output
                 if res2 is not None:
-                    pr2 = res2[i].pred[args.chord, :, k]
-                    ps2 = res2[i].pred_sigma[args.chord, :, k] * args.k2[k]
+                    pr2 = res2[i].pred[args.chord, :, k] * tsc
+                    ps2 = res2[i].pred_sigma[args.chord, :, k] * args.k2[k] * tsc
                     ax.fill_between(t[w], pr2[w] - ps2[w], pr2[w] + ps2[w], color="C1", alpha=0.18, lw=0)
                     ax.plot(t[w], pr2[w], "-", color="C1", lw=1.3, label=args.label2, marker="o", ms=2.0)
                 mm = np.isfinite(y[w])
-                ysig = r.sigma[args.chord, :, k]
+                ysig = r.sigma[args.chord, :, k] * tsc
                 ax.errorbar(
                     t[w][mm],
                     y[w][mm],
