@@ -1,4 +1,6 @@
-"""Zero-shot evaluation protocol: one label-free metadata correction, applied to both targets.
+r"""Zero-shot evaluation protocol: one label-free metadata correction.
+
+The correction is applied identically to both targets.
 
 A model trained on the source machine maps the observed line width w (in bins
 of its input grid) to T_i through the source's calibration,
@@ -25,10 +27,10 @@ finds (diagnostic). Agreement within a few tens of percent means the model is
 physical and the correction is admissible; a large mismatch means it reads
 T_i from other cues and the correction is not.
 
-    pixi run --frozen python -u -m cer_transfer.analysis.physics_correction \\
-        --preds gallery/zs_d3d_full_dg.npz \\
-        --src-window-nm 6.0 --src-stretch 1.4 --tgt-window-nm 2.08 \\
-        --sigma-src gallery/instrument_width_d3d.csv \\
+    pixi run --frozen python -u -m cer_transfer.analysis.physics_correction \
+        --preds gallery/zs_d3d_full_dg.npz \
+        --src-window-nm 6.0 --src-stretch 1.4 --tgt-window-nm 2.08 \
+        --sigma-src gallery/instrument_width_d3d.csv \
         --sigma-tgt gallery/instrument_width_nstx.csv
 
 ``--sigma-src/--sigma-tgt`` take a number (nm) or an instrument_width CSV
@@ -78,13 +80,37 @@ def read_sigma(arg, n_chords=None, column="sigma_inst_nm"):
 def main():
     """Command-line entry point."""
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--preds", required=True, help="eval_checkpoint.py --dump-preds file")
-    ap.add_argument("--src-window-nm", type=float, required=True, help="source window span")
-    ap.add_argument("--src-stretch", type=float, required=True, help="source wavelength_scale used in training")
-    ap.add_argument("--tgt-window-nm", type=float, required=True, help="target window span")
-    ap.add_argument("--tgt-stretch", type=float, default=1.0, help="target wavelength_scale (1 for the reference)")
-    ap.add_argument("--sigma-src", required=True, help="source sigma_inst: nm or instrument_width CSV")
-    ap.add_argument("--sigma-tgt", required=True, help="target sigma_inst: nm or instrument_width CSV")
+    ap.add_argument(
+        "--preds", required=True, help="eval_checkpoint.py --dump-preds file"
+    )
+    ap.add_argument(
+        "--src-window-nm", type=float, required=True, help="source window span"
+    )
+    ap.add_argument(
+        "--src-stretch",
+        type=float,
+        required=True,
+        help="source wavelength_scale used in training",
+    )
+    ap.add_argument(
+        "--tgt-window-nm", type=float, required=True, help="target window span"
+    )
+    ap.add_argument(
+        "--tgt-stretch",
+        type=float,
+        default=1.0,
+        help="target wavelength_scale (1 for the reference)",
+    )
+    ap.add_argument(
+        "--sigma-src",
+        required=True,
+        help="source sigma_inst: nm or instrument_width CSV",
+    )
+    ap.add_argument(
+        "--sigma-tgt",
+        required=True,
+        help="target sigma_inst: nm or instrument_width CSV",
+    )
     ap.add_argument(
         "--sigma-column",
         default="sigma_anchored_nm",
@@ -93,15 +119,21 @@ def main():
     )
     ap.add_argument("--lambda0-nm", type=float, default=529.05)
     ap.add_argument("--mass-amu", type=float, default=12.0)
-    ap.add_argument("--y-max", type=float, default=None, help="score only labels <= y_max eV")
+    ap.add_argument(
+        "--y-max", type=float, default=None, help="score only labels <= y_max eV"
+    )
     ap.add_argument("--out", type=Path, default=None, help="write corrected dump (npz)")
-    ap.add_argument("--csv", type=Path, default=None,
-                    help="write one row per target: target, r2_raw, r2_protocol, r2_affine, slope_ratio, n")
+    ap.add_argument(
+        "--csv",
+        type=Path,
+        default=None,
+        help="write one row per target: target, r2_raw, r2_protocol, r2_affine, "
+        "slope_ratio, n",
+    )
     args = ap.parse_args()
 
     d = load_predictions(args.preds)
     names = d.targets or ["ti", "vtor"]
-    k_ti = names.index("ti")
     sigma_src_pc, sigma_src = read_sigma(args.sigma_src, column=args.sigma_column)
     sigma_tgt_pc, sigma_tgt = read_sigma(args.sigma_tgt, d.C, column="sigma_inst_nm")
 
@@ -113,15 +145,19 @@ def main():
     offset_pc = s2 * K * sigma_src**2 - K * sig_t**2  # per target chord
 
     print(
-        f"K = {K:.4g} eV/nm^2 | p_src = {p_src:.5f} nm/bin, p_tgt = {p_tgt:.5f} nm/bin, "
-        f"s = {np.sqrt(s2):.4f} | sigma_src = {sigma_src:.5f} nm ({K * sigma_src**2:.0f} eV), "
+        f"K = {K:.4g} eV/nm^2 | p_src = {p_src:.5f} nm/bin, "
+        f"p_tgt = {p_tgt:.5f} nm/bin, s = {np.sqrt(s2):.4f} | "
+        f"sigma_src = {sigma_src:.5f} nm ({K * sigma_src**2:.0f} eV), "
         f"sigma_tgt = {sigma_tgt:.5f} nm ({K * sigma_tgt**2:.0f} eV)"
     )
     print(
         f"protocol (label-free, both targets): v_corr = {np.sqrt(s2):.4f} * v_pred ; "
         f"T_corr = {s2:.4f} * T_pred + {np.median(offset_pc):.4g} eV"
-        + (f" (per-chord offsets {offset_pc.min():.4g} .. {offset_pc.max():.4g})"
-           if sigma_tgt_pc is not None else "")
+        + (
+            f" (per-chord offsets {offset_pc.min():.4g} .. {offset_pc.max():.4g})"
+            if sigma_tgt_pc is not None
+            else ""
+        )
     )
     corrected = {}
     rows = []
@@ -147,8 +183,10 @@ def main():
         ratio = phys_slope / a if a else float("nan")
         unit = "eV" if name == "ti" else "km/s"
         print(
-            f"{name}: R2 raw {r2_raw:.3f} | protocol {r2_cor:.3f} | affine (diagnostic) {r2_aff:.3f}"
-            f"   RMSE {rmse_raw:.4g} -> {rmse_cor:.4g} ({rmse_aff:.4g}) {unit} | n = {int(ok.sum())}"
+            f"{name}: R2 raw {r2_raw:.3f} | protocol {r2_cor:.3f} | affine "
+            f"(diagnostic) {r2_aff:.3f}"
+            f"   RMSE {rmse_raw:.4g} -> {rmse_cor:.4g} ({rmse_aff:.4g}) {unit} | n = "
+            f"{int(ok.sum())}"
         )
         print(
             f"      affine fit y = {a:.4f} * pred + {b:.4g} {unit}; "
@@ -159,10 +197,11 @@ def main():
         args.csv.parent.mkdir(parents=True, exist_ok=True)
         with open(args.csv, "w", newline="") as fh:
             w = csv.writer(fh)
-            w.writerow(["target", "r2_raw", "r2_protocol", "r2_affine", "slope_ratio", "n"])
+            w.writerow(
+                ["target", "r2_raw", "r2_protocol", "r2_affine", "slope_ratio", "n"]
+            )
             w.writerows(rows)
         print(f"wrote {args.csv}")
-    pred_ti = d.pred[..., k_ti]  # for --out below
     if args.out is not None:
         raw = np.load(args.preds)
         out = {k: raw[k] for k in raw.files}

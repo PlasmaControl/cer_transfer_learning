@@ -1,15 +1,16 @@
-"""Reconstruction composite from REAL data (one discharge): input
-spectrograms, time traces, and profiles; optional second-model overlay.
+r"""Reconstruction composite of one discharge.
+
+Input spectrograms, time traces, and profiles; optional second-model overlay.
 Generic tool -- the output name states the figure role:
 
   paper Fig 2 (legacy reconstruction):
     cer_transfer.figures.recon_composite --preds legacy.npz --shot <legacy joblib> \
-        --label1 "model (51-chord)" --t-offset -0.235 --unl-gap 2 \\
+        --label1 "model (51-chord)" --t-offset -0.235 --unl-gap 2 \
         --out-name fig2_reconstruction
   paper Fig 3 (background vs active):
     cer_transfer.figures.recon_composite --preds passive.npz --preds2 active.npz \
         --label1 "background model" --label2 "active model" \
-        --shot <background joblib> --t-offset -0.235 --unl-gap 2 \\
+        --shot <background joblib> --t-offset -0.235 --unl-gap 2 \
         --out-name fig3_background
 
     pixi run python -u fig1_composite.py --preds fig1_shot.npz \
@@ -36,8 +37,8 @@ import seaborn as sns
 
 from cer_transfer.configs import data_path
 from cer_transfer.figures.common import chord_coordinate, sorted_chords
-from cer_transfer.figures.timeaxis import file_times  # noqa: E402
 from cer_transfer.figures.paperfig import PAPER_W, bbox  # noqa: E402
+from cer_transfer.figures.timeaxis import file_times  # noqa: E402
 
 sns.set_style("white")
 
@@ -160,14 +161,24 @@ def main():
         d2 = np.load(args.preds2)
         assert len(d2["chord"]) == len(ch), "preds2 shape mismatch"
         pr2 = d2["pred"].reshape(C, T, -1)
-    t_s = file_times(args.shot, T, 200.0, args.t_offset) if args.shot else np.arange(T) / 200.0 + args.t_offset
+    t_s = (
+        file_times(args.shot, T, 200.0, args.t_offset)
+        if args.shot
+        else np.arange(T) / 200.0 + args.t_offset
+    )
     # display T_i in keV (index 0); frame selection below is unit-independent
-    y = y.astype(np.float64).copy(); sl = sl.astype(np.float64).copy(); pr = pr.astype(np.float64).copy()
-    y[..., 0] /= 1000.0; sl[..., 0] /= 1000.0; pr[..., 0] /= 1000.0
+    y = y.astype(np.float64).copy()
+    sl = sl.astype(np.float64).copy()
+    pr = pr.astype(np.float64).copy()
+    y[..., 0] /= 1000.0
+    sl[..., 0] /= 1000.0
+    pr[..., 0] /= 1000.0
     if ps is not None:
-        ps = ps.astype(np.float64).copy(); ps[..., 0] /= 1000.0
+        ps = ps.astype(np.float64).copy()
+        ps[..., 0] /= 1000.0
     if pr2 is not None:
-        pr2 = pr2.astype(np.float64).copy(); pr2[..., 0] /= 1000.0
+        pr2 = pr2.astype(np.float64).copy()
+        pr2[..., 0] /= 1000.0
 
     lab_frac = np.isfinite(y[..., 0]).mean(axis=0)
     # well-labeled frame at PEAK plasma (max mean labeled Ti among the
@@ -346,12 +357,17 @@ def main():
             # time traces at fixed chords
             ax = axes[0, col]
             trace_panel(ax, 1, "$v_{tor}$ (km/s)")
-            ax.set_title(f"time traces, {args.label1}" if pr2 is None else "time traces", fontsize="small")
+            ax.set_title(
+                f"time traces, {args.label1}" if pr2 is None else "time traces",
+                fontsize="small",
+            )
             if pr2 is None:
                 hnd = [
                     Line2D([], [], color=f"C{i}", lw=1.6) for i in range(len(tr_chords))
                 ]
-                lbl = [f"chord {cc}" for cc in tr_chords]  # the model is named in the column title
+                lbl = [
+                    f"chord {cc}" for cc in tr_chords
+                ]  # the model is named in the column title
                 if ps is not None:
                     hnd.append(Patch(color="0.6", alpha=0.35))
                     lbl.append(band_lab)
@@ -430,7 +446,9 @@ def main():
                 pc1 = "C3" if args.vtor_only else "C0"  # model 1 (solid)
                 pc2 = "0.45" if args.vtor_only else "C2"  # model 2 (dash-dot)
                 """Profile at the fitted (and fit-free) frame for one target."""
-                spans = []  # no "no conventional fit" area: the x-range ends at the last fitted chord
+                # no "no conventional fit" area: the x-range ends at the last
+                # fitted chord
+                spans = []
                 if ps is not None:
                     # band only for the fitted-time profile; lighter where no
                     # fit exists (large uncertainty, may leave the axes)

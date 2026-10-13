@@ -16,10 +16,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from cer_transfer.figures.paperfig import PAPER_W, bbox
 from joblib import load
 
 from cer_transfer.configs import data_path, get_machine
+from cer_transfer.figures.paperfig import PAPER_W, bbox
 
 sns.set_style("whitegrid")
 UNITS = {"ti": "keV", "vtor": "km/s"}
@@ -29,9 +29,11 @@ AXLBL = {"ti": "T$_i$ (keV)", "vtor": "v$_{tor}$ (km/s)"}
 
 
 def _render(build_fig, out: Path, name: str):
-    """Render twice: talk context -> png (slide-sized), paper context ->
-    pdf (column-sized). build_fig receives the context name and must size
-    the figure accordingly."""
+    """Render twice: talk context to png, paper context to pdf.
+
+    ``build_fig`` receives the context name and must size the figure
+    accordingly.
+    """
     out.mkdir(parents=True, exist_ok=True)
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
@@ -259,7 +261,9 @@ def cmd_curves(args):
         if args.metric not in df.columns:
             print(f"skip {path}: no column {args.metric}")
             continue
-        label = labels[i] if i < len(labels) else Path(path).stem.replace(".metrics", "")
+        label = (
+            labels[i] if i < len(labels) else Path(path).stem.replace(".metrics", "")
+        )
         runs.append((label, df))
 
     def build(ctx):
@@ -277,23 +281,42 @@ def cmd_curves(args):
             if args.drop_outliers:
                 # epochs whose score falls more than --outlier-drop below the running
                 # best of the preceding epochs AND below the median of a wide window are
-                # collapsed epochs (resume after a SLURM requeue, bad batch): replaced by
-                # linear interpolation between the neighbouring valid epochs, and reported
+                # collapsed epochs (resume after a SLURM requeue, bad batch): replaced
+                # by
+                # linear interpolation between the neighbouring valid epochs, and
+                # reported
                 vs = pd.Series(v)
                 med = vs.rolling(9, center=True, min_periods=3).median().to_numpy()
                 run_best = vs.cummax().shift(1).fillna(vs.iloc[0]).to_numpy()
-                late = np.arange(v.size) >= 10  # early epochs climb steeply: neither rule applies there
-                bad = ((v < med - args.outlier_drop) | (v < run_best - 1.5 * args.outlier_drop)) & late
+                late = (
+                    np.arange(v.size) >= 10
+                )  # early epochs climb steeply: neither rule applies there
+                bad = (
+                    (v < med - args.outlier_drop)
+                    | (v < run_best - 1.5 * args.outlier_drop)
+                ) & late
                 if bad.any():
-                    print(f"{label}: interpolated over collapsed epochs "
-                          + ", ".join(f"{e} ({v[e]:.3f})" for e in np.where(bad)[0]))
-                v = pd.Series(np.where(bad, np.nan, v)).interpolate(limit_area="inside").to_numpy()
+                    print(
+                        f"{label}: interpolated over collapsed epochs "
+                        + ", ".join(f"{e} ({v[e]:.3f})" for e in np.where(bad)[0])
+                    )
+                v = (
+                    pd.Series(np.where(bad, np.nan, v))
+                    .interpolate(limit_area="inside")
+                    .to_numpy()
+                )
             ax.plot(x, v, lw=1.4, color=f"C{i}", label=label)
             if args.mark_best:
                 j = int(np.nanargmax(v))
                 ax.plot([np.asarray(x)[j]], [v[j]], "o", color=f"C{i}", ms=5)
-                ax.annotate(f"{v[j]:.3f}", (np.asarray(x)[j], v[j]), xytext=(4, -10),
-                            textcoords="offset points", fontsize="x-small", color=f"C{i}")
+                ax.annotate(
+                    f"{v[j]:.3f}",
+                    (np.asarray(x)[j], v[j]),
+                    xytext=(4, -10),
+                    textcoords="offset points",
+                    fontsize="x-small",
+                    color=f"C{i}",
+                )
         ax.set_ylabel("Validation score" if args.metric == "val_score" else args.metric)
         if args.ylim:
             ax.set_ylim(*args.ylim)
@@ -328,7 +351,8 @@ def cmd_scaling(args):
     if getattr(args, "zero_shot_csv", None):
         z = pd.read_csv(args.zero_shot_csv)
         # same definition as the training's val_score: mean of the per-target R2;
-        # the column selects raw R2 or the label-free protocol R2 (physics_correction --csv)
+        # the column selects raw R2 or the label-free protocol R2 (physics_correction
+        # --csv)
         col = getattr(args, "zero_shot_column", "r2_raw")
         zero = float(z[col].mean())
 
@@ -355,7 +379,11 @@ def cmd_scaling(args):
                 mfc="none",
                 color="C3",
                 ms=8,
-                label=(getattr(args, "scratch_label", None) or "NSTX model") if i == 0 else None,
+                label=(
+                    (getattr(args, "scratch_label", None) or "NSTX model")
+                    if i == 0
+                    else None
+                ),
             )
         if agn:
             ax.plot(
@@ -487,9 +515,11 @@ def cmd_sizes(args):
 
 
 def cmd_chords(args):
-    """Per-chord R2 curves from eval_checkpoint CSVs, one line per model,
-    one panel per target. Optional per-chord ceiling CSV (ceiling_check
-    --per-chord --out) drawn as a gray band/line."""
+    """Plot per-chord R2 curves from eval_checkpoint CSVs.
+
+    One line per model, one panel per target. An optional per-chord ceiling
+    CSV (ceiling_check --per-chord --out) is drawn as a gray band/line.
+    """
     frames = [
         (lab, pd.read_csv(path)) for lab, path in (s.split(":", 1) for s in args.evals)
     ]
@@ -661,14 +691,28 @@ def main():
     c.add_argument("--csv", nargs="+", required=True)
     c.add_argument("--metric", default="val_score")
     c.add_argument("--x", choices=["epoch", "hours"], default="epoch")
-    c.add_argument("--labels", nargs="*", default=None, help="legend text per CSV (same order)")
-    c.add_argument("--mark-best", action="store_true", help="mark the best epoch of each curve")
-    c.add_argument("--drop-outliers", action="store_true",
-                   help="interpolate linearly over epochs whose score collapses (resume dips)")
-    c.add_argument("--outlier-drop", type=float, default=0.03,
-                   help="drop below the 9-epoch rolling median that marks a collapsed epoch (default 0.03)")
+    c.add_argument(
+        "--labels", nargs="*", default=None, help="legend text per CSV (same order)"
+    )
+    c.add_argument(
+        "--mark-best", action="store_true", help="mark the best epoch of each curve"
+    )
+    c.add_argument(
+        "--drop-outliers",
+        action="store_true",
+        help="interpolate linearly over epochs whose score collapses (resume dips)",
+    )
+    c.add_argument(
+        "--outlier-drop",
+        type=float,
+        default=0.03,
+        help="drop below the 9-epoch rolling median that marks a collapsed epoch "
+        "(default 0.03)",
+    )
     c.add_argument("--ylim", type=float, nargs=2, default=None)
-    c.add_argument("--out-name", default=None, help="file stem (default learning_curves_<metric>)")
+    c.add_argument(
+        "--out-name", default=None, help="file stem (default learning_curves_<metric>)"
+    )
     c.add_argument("--out", type=Path, default=Path("figs"))
     c.set_defaults(fn=cmd_curves)
 
@@ -682,14 +726,16 @@ def main():
     s.add_argument(
         "--annotate-match",
         action="store_true",
-        help="with --annotate: also mark the from-scratch full-data score (dotted line) "
+        help="with --annotate: also mark the from-scratch full-data score (dotted "
+        "line) "
         "and the smallest fine-tuned subset that reaches it",
     )
     s.add_argument(
         "--agnostic-scratch",
         nargs="*",
         default=None,
-        help="N:metrics.csv of the machine-agnostic model trained from scratch on N discharges",
+        help="N:metrics.csv of the machine-agnostic model trained from scratch on N "
+        "discharges",
     )
     s.add_argument(
         "--agnostic-label",
@@ -707,13 +753,27 @@ def main():
         "--zero-shot-column",
         default="r2_raw",
         help="column of --zero-shot-csv to average: r2_raw, or r2_protocol from "
-        "cer_transfer.analysis.physics_correction --csv (label-free metadata correction)",
+        "cer_transfer.analysis.physics_correction --csv (label-free metadata "
+        "correction)",
     )
-    s.add_argument("--zero-shot-label", default=None,
-                   help="legend text for the zero-shot line (default: 'DIII-D only')")
-    s.add_argument("--runs-label", default=None, help="legend text of --runs (default 'DIII-D+NSTX (fine-tuned)')")
-    s.add_argument("--scratch-label", default=None, help="legend text of --scratch (default 'NSTX only')")
-    s.add_argument("--ylabel", default=None, help="y-axis label (default 'NSTX validation score')")
+    s.add_argument(
+        "--zero-shot-label",
+        default=None,
+        help="legend text for the zero-shot line (default: 'DIII-D only')",
+    )
+    s.add_argument(
+        "--runs-label",
+        default=None,
+        help="legend text of --runs (default 'DIII-D+NSTX (fine-tuned)')",
+    )
+    s.add_argument(
+        "--scratch-label",
+        default=None,
+        help="legend text of --scratch (default 'NSTX only')",
+    )
+    s.add_argument(
+        "--ylabel", default=None, help="y-axis label (default 'NSTX validation score')"
+    )
     s.add_argument(
         "--annotate",
         action="store_true",

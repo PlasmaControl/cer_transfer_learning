@@ -1,6 +1,7 @@
-"""Beam-off examples: reconstruction from the regular CHERS spectra while the
-neutral beam is off (only passive emission left), next to the conventional
-fits before and after.
+r"""Beam-off examples: reconstruction while the neutral beam is off.
+
+The model runs on the regular CHERS spectra (only passive emission left during
+the phase) and is drawn next to the conventional fits before and after.
 
 Everything comes from one model checkpoint and the discharge files of the
 regular array; no background array, no stored prediction dumps:
@@ -10,9 +11,9 @@ regular array; no background array, no stored prediction dumps:
   reduced line brightness, bounded by fitted frames on both sides
 * the model is run on the discharge directly (``cer_transfer.inference``)
 
-    pixi run python -u -m cer_transfer.figures.beamoff_examples \\
-        --checkpoint cer_ckpts/nstx_agn_ft_rfull.pt --list splits/nstx_val.txt \\
-        --n 2 --chord 2 --target vtor --min-off-ms 50 --margin-before 0.20 0.06 \\
+    pixi run python -u -m cer_transfer.figures.beamoff_examples \
+        --checkpoint cer_ckpts/nstx_agn_ft_rfull.pt --list splits/nstx_val.txt \
+        --n 2 --chord 2 --target vtor --min-off-ms 50 --margin-before 0.20 0.06 \
         [--k 0.99 1.17] [--machine nstx] --out figs --out-name beamoff_examples
 """
 
@@ -31,12 +32,12 @@ from joblib import load  # noqa: E402
 
 from cer_transfer.configs import data_path  # noqa: E402
 from cer_transfer.figures.common import FRAME_HZ  # noqa: E402
-from cer_transfer.figures.timeaxis import file_times  # noqa: E402
 from cer_transfer.figures.paperfig import PAPER_W, bbox  # noqa: E402
+from cer_transfer.figures.timeaxis import file_times  # noqa: E402
 
 
 def rotating_context(y, a, b, fs, context_ms, min_rot, min_fits, chord=None):
-    """True if the plasma rotates on both sides of the phase (a, b).
+    """Return True if the plasma rotates on both sides of the phase (a, b).
 
     Within ``context_ms`` before a and after b there must be at least
     ``min_fits`` fitted frames whose median |v_tor| (over the chords with a
@@ -86,7 +87,11 @@ def off_phases(path, min_frames, k_target=1, rotating=None):
             run = []
     if rotating is not None:
         fs, cms, mrot, mfit, ch = rotating
-        phases = [ab for ab in phases if rotating_context(y, ab[0], ab[1], fs, cms, mrot, mfit, ch)]
+        phases = [
+            ab
+            for ab in phases
+            if rotating_context(y, ab[0], ab[1], fs, cms, mrot, mfit, ch)
+        ]
     return phases, T
 
 
@@ -123,19 +128,53 @@ def main():
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", default="beamoff_examples")
     p.add_argument("--label", default="model", help="legend text of the model line")
-    p.add_argument("--min-rotation", type=float, default=0.0,
-                   help="keep only phases with median |v_tor| above this (km/s) on both sides "
-                   "(labels only); 0 = no requirement")
-    p.add_argument("--context-ms", type=float, default=50.0, help="window on each side for --min-rotation")
-    p.add_argument("--min-fits-side", type=int, default=3, help="fitted frames required on each side")
-    p.add_argument("--rotation-on-chord", action="store_true",
-                   help="evaluate --min-rotation on the plotted chord only (default: median over chords)")
-    p.add_argument("--checkpoint2", type=Path, default=None,
-                   help="second model drawn in the same panels (orange), e.g. the fine-tuned NSTX model")
-    p.add_argument("--label2", default="second model", help="legend text of --checkpoint2")
-    p.add_argument("--k2", type=float, nargs=2, default=(1.0, 1.0),
-                   help="calibration factors (Ti, vtor) of the second model's uncertainty")
-    p.add_argument("--machine2", default=None, help="machine config for --checkpoint2 (default: its own)")
+    p.add_argument(
+        "--min-rotation",
+        type=float,
+        default=0.0,
+        help="keep only phases with median |v_tor| above this (km/s) on both sides "
+        "(labels only); 0 = no requirement",
+    )
+    p.add_argument(
+        "--context-ms",
+        type=float,
+        default=50.0,
+        help="window on each side for --min-rotation",
+    )
+    p.add_argument(
+        "--min-fits-side",
+        type=int,
+        default=3,
+        help="fitted frames required on each side",
+    )
+    p.add_argument(
+        "--rotation-on-chord",
+        action="store_true",
+        help="evaluate --min-rotation on the plotted chord only (default: median "
+        "over chords)",
+    )
+    p.add_argument(
+        "--checkpoint2",
+        type=Path,
+        default=None,
+        help="second model drawn in the same panels (orange), e.g. the fine-tuned "
+        "NSTX model",
+    )
+    p.add_argument(
+        "--label2", default="second model", help="legend text of --checkpoint2"
+    )
+    p.add_argument(
+        "--k2",
+        type=float,
+        nargs=2,
+        default=(1.0, 1.0),
+        help="calibration factors (Ti, vtor) of the second model's uncertainty",
+    )
+    p.add_argument(
+        "--machine2",
+        default=None,
+        help="machine config for --checkpoint2 (default: its own)",
+    )
     args = p.parse_args()
     from cer_transfer.inference import load_model, predict_file
 
@@ -153,8 +192,13 @@ def main():
         entries = entries[: args.scan_limit]
     rot = None
     if args.min_rotation > 0:
-        rot = (args.fs, args.context_ms, args.min_rotation, args.min_fits_side,
-               args.chord if args.rotation_on_chord else None)
+        rot = (
+            args.fs,
+            args.context_ms,
+            args.min_rotation,
+            args.min_fits_side,
+            args.chord if args.rotation_on_chord else None,
+        )
     cands = []
     for e in entries:
         ph, _ = off_phases(e, min_frames, k, rotating=rot)
@@ -171,13 +215,12 @@ def main():
         lo = max(0, mid - args.n // 2)
         chosen = cands[lo : lo + args.n]
     print(
-        f"{len(cands)} discharges with beam-off phases >= {args.min_off_ms:.0f} ms; using:"
+        f"{len(cands)} discharges with beam-off phases >= {args.min_off_ms:.0f} ms; "
+        "using:"
     )
     for dur, e, (a, b) in chosen:
-        print(
-            f"  {e}: {file_times(e, b + 1, args.fs, args.t_offset)[a]:.3f}-{file_times(e, b + 1, args.fs, args.t_offset)[b]:.3f} s "
-            f"({1000 * dur:.0f} ms)"
-        )
+        te = file_times(e, b + 1, args.fs, args.t_offset)
+        print(f"  {e}: {te[a]:.3f}-{te[b]:.3f} s ({1000 * dur:.0f} ms)")
 
     m = load_model(args.checkpoint, machine=args.machine)
     res = [predict_file(m, e) for _, e, _ in chosen]
@@ -196,22 +239,40 @@ def main():
             nbi = []
             for _, e, _ in chosen:
                 dd = load(data_path(e), mmap_mode="r")
-                tot = np.asarray(dd["nbi_power_MW"], np.float64) if "nbi_power_MW" in dd else None
-                src = np.asarray(dd["nbi_power_src_MW"], np.float64) if "nbi_power_src_MW" in dd else None
+                tot = (
+                    np.asarray(dd["nbi_power_MW"], np.float64)
+                    if "nbi_power_MW" in dd
+                    else None
+                )
+                src = (
+                    np.asarray(dd["nbi_power_src_MW"], np.float64)
+                    if "nbi_power_src_MW" in dd
+                    else None
+                )
                 nbi.append((tot, src))
             has_nbi = any(t_ is not None for t_, _ in nbi)
-            size = ((PAPER_W, 3.4) if has_nbi else (PAPER_W, 2.5)) if ctx == "paper" else ((13, 6.2) if has_nbi else (13, 4.5))
+            size = (
+                ((PAPER_W, 3.4) if has_nbi else (PAPER_W, 2.5))
+                if ctx == "paper"
+                else ((13, 6.2) if has_nbi else (13, 4.5))
+            )
             fig = plt.figure(figsize=size)
-            gs = fig.add_gridspec(2 if has_nbi else 1, n, height_ratios=[1, 0.42] if has_nbi else [1])
+            gs = fig.add_gridspec(
+                2 if has_nbi else 1, n, height_ratios=[1, 0.42] if has_nbi else [1]
+            )
             axes = [[fig.add_subplot(gs[0, j]) for j in range(n)]]
             if has_nbi:
-                axes.append([fig.add_subplot(gs[1, j], sharex=axes[0][j]) for j in range(n)])
+                axes.append(
+                    [fig.add_subplot(gs[1, j], sharex=axes[0][j]) for j in range(n)]
+                )
             for i, (ax, (dur, e, (a, b)), r) in enumerate(zip(axes[0], chosen, res)):
                 pr = r.pred[args.chord, :, k] * tsc
                 ps = r.pred_sigma[args.chord, :, k] * args.k[k] * tsc
                 y = r.y[args.chord, :, k] * tsc
                 T = pr.shape[0]
-                t = file_times(e, T, args.fs, args.t_offset)  # time_s from the file when present
+                t = file_times(
+                    e, T, args.fs, args.t_offset
+                )  # time_s from the file when present
                 mb = args.margin_before or [args.margin]
                 ma = args.margin_after or [args.margin]
                 f0 = max(a - int(round(mb[min(i, len(mb) - 1)] * args.fs)), 0)
@@ -227,12 +288,37 @@ def main():
                 ax.fill_between(
                     t[w], pr[w] - ps[w], pr[w] + ps[w], color="C0", alpha=0.22, lw=0
                 )
-                ax.plot(t[w], pr[w], "-", color="C0", lw=1.5, label=args.label, marker="o", ms=2.2)  # one marker per output
+                ax.plot(
+                    t[w],
+                    pr[w],
+                    "-",
+                    color="C0",
+                    lw=1.5,
+                    label=args.label,
+                    marker="o",
+                    ms=2.2,
+                )  # one marker per output
                 if res2 is not None:
                     pr2 = res2[i].pred[args.chord, :, k] * tsc
                     ps2 = res2[i].pred_sigma[args.chord, :, k] * args.k2[k] * tsc
-                    ax.fill_between(t[w], pr2[w] - ps2[w], pr2[w] + ps2[w], color="C1", alpha=0.18, lw=0)
-                    ax.plot(t[w], pr2[w], "-", color="C1", lw=1.3, label=args.label2, marker="o", ms=2.0)
+                    ax.fill_between(
+                        t[w],
+                        pr2[w] - ps2[w],
+                        pr2[w] + ps2[w],
+                        color="C1",
+                        alpha=0.18,
+                        lw=0,
+                    )
+                    ax.plot(
+                        t[w],
+                        pr2[w],
+                        "-",
+                        color="C1",
+                        lw=1.3,
+                        label=args.label2,
+                        marker="o",
+                        ms=2.0,
+                    )
                 mm = np.isfinite(y[w])
                 ysig = r.sigma[args.chord, :, k] * tsc
                 ax.errorbar(
@@ -257,7 +343,13 @@ def main():
                     plt.setp(ax.get_xticklabels(), visible=False)
                     axn = axes[1][i]
                     tot, src = nbi[i]
-                    axn.axvspan(t[a] - 0.5 / args.fs, t[b] + 0.5 / args.fs, color="0.88", zorder=0, lw=0)
+                    axn.axvspan(
+                        t[a] - 0.5 / args.fs,
+                        t[b] + 0.5 / args.fs,
+                        color="0.88",
+                        zorder=0,
+                        lw=0,
+                    )
                     if tot is not None:
                         axn.plot(t[w], tot[w], "-", color="C2", lw=1.5)
                     axn.set_ylim(bottom=0)

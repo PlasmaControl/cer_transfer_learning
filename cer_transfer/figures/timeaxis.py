@@ -11,7 +11,10 @@ import numpy as np
 
 
 def file_times(source, T, fs=200.0, t_offset=0.0):
-    """Time (s) of frames 0..T-1 of ``source`` (file path, list entry or loaded dict)."""
+    """Return the time (s) of frames 0..T-1 of ``source``.
+
+    ``source`` is a file path, a list entry or a loaded joblib dict.
+    """
     dd = source
     if dd is not None and not hasattr(dd, "keys"):
         from joblib import load

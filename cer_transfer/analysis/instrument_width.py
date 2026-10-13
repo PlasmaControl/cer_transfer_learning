@@ -1,4 +1,4 @@
-"""Per-chord instrument width of a CER/CHERS spectrometer, estimated from spectra.
+r"""Per-chord instrument width of a CER/CHERS spectrometer, estimated from spectra.
 
 Two estimators, both per chord:
 
@@ -23,14 +23,15 @@ maximum, as a Gaussian sigma (FWHM / 2.3548). Frames with peak S/N below
 (active + passive above half maximum) come out wider and never set the
 envelope; for estimator 2 they bias sigma_inst^2 upward, hence the median.
 
-Units: nm (``--window-nm`` = wavelength span of the files' window, 2.08 nm
-NSTX, 6.0 nm DIII-D), native pixels, and bins of the common 256-bin NSTX
+Units: nm (NSTX: ``--window-nm`` 2.08 over any W; DIII-D: fixed ``--pitch-nm``
+6.0/536, because its 536- and 390-bin files share the pitch and differ in
+window, 6.0 vs 4.37 nm), native pixels, and bins of the common 256-bin NSTX
 reference grid (2.08 nm / 256), the unit in which the model sees widths.
 
-    pixi run --frozen python -u -m cer_transfer.analysis.instrument_width \\
-        --machine nstx --list splits/nstx_train.txt --max-files 200 \\
+    pixi run --frozen python -u -m cer_transfer.analysis.instrument_width \
+        --machine nstx --list splits/nstx_train.txt --max-files 200 \
         --csv gallery/instrument_width_nstx.csv
-    pixi run --frozen python -u -m cer_transfer.analysis.instrument_width \\
+    pixi run --frozen python -u -m cer_transfer.analysis.instrument_width \
         --machine d3d_tangential --max-files 200 --csv gallery/instrument_width_d3d.csv
     # (DIII-D has no list files: the machine's train_dir is scanned; --dirs overrides)
 
@@ -55,7 +56,10 @@ AMU_EV = 931.494_102e6  # eV / c^2
 LAMBDA0_NM, MASS_AMU = 529.05, 12.0  # C VI
 K_EV_PER_NM2 = MASS_AMU * AMU_EV / LAMBDA0_NM**2  # T_i = K * sigma_th^2
 REF_WINDOW_NM, REF_BINS = 2.08, 256  # NSTX CHERS window on the common grid
-DEFAULT_WINDOW_NM = {"nstx": 2.08, "d3d": 6.0}  # by machine-name prefix
+DEFAULT_WINDOW_NM = {"nstx": 2.08}  # by machine-name prefix: fixed window, any W
+# machines whose preprocessed files share one pixel pitch but differ in window
+# (DIII-D: 536 bins = 6.0 nm, 390 bins = 4.37 nm): nm per native bin
+DEFAULT_PITCH_NM = {"d3d": 6.0 / 536}
 
 
 def read_list(paths):
@@ -121,7 +125,9 @@ def main():
         help="folders of discharge files under CER_DATA_ROOT (default for machines "
         "with a train_dir, e.g. d3d_tangential -> training_set_30)",
     )
-    ap.add_argument("--max-files", type=int, default=200, help="evenly spaced files read")
+    ap.add_argument(
+        "--max-files", type=int, default=200, help="evenly spaced files read"
+    )
     ap.add_argument("--stride", type=int, default=4, help="use every k-th frame")
     ap.add_argument("--snr-min", type=float, default=20.0, help="peak S/N threshold")
     ap.add_argument(
@@ -135,20 +141,37 @@ def main():
         + ", ".join(f"{k} {v}" for k, v in DEFAULT_WINDOW_NM.items()),
     )
     ap.add_argument(
-        "--bins", type=int, default=None,
+        "--pitch-nm",
+        type=float,
+        default=None,
+        help="nm per native bin, constant across files (window = W * pitch); default "
+        "by "
+        "machine: " + ", ".join(f"{k} {v:.6f}" for k, v in DEFAULT_PITCH_NM.items()),
+    )
+    ap.add_argument(
+        "--bins",
+        type=int,
+        default=None,
         help="use only files with this native bin count (e.g. 390 or 536 on DIII-D)",
     )
     ap.add_argument("--csv", type=Path, default=None, help="per-chord table")
     args = ap.parse_args()
 
     machine = get_machine(args.machine)
-    window_nm = args.window_nm
-    if window_nm is None:
+    window_nm, pitch_nm = args.window_nm, args.pitch_nm
+    if window_nm is None and pitch_nm is None:
+        for k, v in DEFAULT_PITCH_NM.items():
+            if machine.name.startswith(k):
+                pitch_nm = v
         for k, v in DEFAULT_WINDOW_NM.items():
             if machine.name.startswith(k):
                 window_nm = v
-        if window_nm is None:
-            raise SystemExit("--window-nm required for this machine")
+        if window_nm is None and pitch_nm is None:
+            raise SystemExit("--window-nm or --pitch-nm required for this machine")
+
+    def nm_per_bin(W):
+        return pitch_nm if pitch_nm is not None else window_nm / W
+
     chords = (
         np.arange(machine.n_chords)
         if machine.chord_indices is None
@@ -164,7 +187,11 @@ def main():
         entries = []
         for d in dirs:
             pd = data_path(d)
-            entries += [str(Path(d) / f) for f in sorted(os.listdir(pd)) if f.endswith(".joblib")]
+            entries += [
+                str(Path(d) / f)
+                for f in sorted(os.listdir(pd))
+                if f.endswith(".joblib")
+            ]
         print(f"{len(entries)} files in {dirs}")
     if args.bins is not None:
         keep = []
@@ -204,25 +231,36 @@ def main():
         n_kept += int(ok.sum())
         ti = None
         if "target" in dd:
-            ti = np.asarray(dd["target"][:, : T : args.stride, 0], np.float64)[chords] * scale[0]
+            ti = (
+                np.asarray(dd["target"][:, : T : args.stride, 0], np.float64)[chords]
+                * scale[0]
+            )
         for c in range(C):
-            s = sig[c][ok[c]] * (window_nm / W)  # nm; this file's bin count
+            s = sig[c][ok[c]] * nm_per_bin(W)  # nm
             if s.size:
                 per_chord[c].append(s)
             if ti is not None:
                 lab = np.isfinite(ti[c]) & ok[c]
                 if lab.any():
-                    s_lab = sig[c][lab] * (window_nm / W)
+                    s_lab = sig[c][lab] * nm_per_bin(W)
                     anchored[c].append(s_lab**2 - ti[c][lab] / K_EV_PER_NM2)
         if (i + 1) % 25 == 0:
             print(f"  {i + 1}/{len(entries)} files, {n_kept}/{n_frames} frames kept")
 
     ref_nm_per_bin = REF_WINDOW_NM / REF_BINS
     main_w = max(widths_px, key=widths_px.get) if widths_px else float("nan")
+    px_nm = nm_per_bin(main_w)
+    if window_nm is None:
+        window_nm = main_w * px_nm  # window of the most common file type
     print(
         f"\n{machine.name}: {len(entries)} files, native bins {dict(widths_px)}, "
-        f"window {window_nm} nm ({window_nm / main_w:.5f} nm/px for {main_w} bins); "
-        f"{n_kept}/{n_frames} chord-frames with S/N >= {args.snr_min}"
+        f"{px_nm:.5f} nm/px"
+        + (
+            f" (fixed pitch; window {main_w * px_nm:.2f} nm for {main_w} bins)"
+            if pitch_nm is not None
+            else f" (window {window_nm} nm over {main_w} bins)"
+        )
+        + f"; {n_kept}/{n_frames} chord-frames with S/N >= {args.snr_min}"
     )
     print(
         f"{'chord':>5} {'n':>7} {'p'+str(args.percentile):>9} {'p10':>8} {'median':>8}"
@@ -245,7 +283,7 @@ def main():
         rows.append((int(c), v.size, p_env, p10, med, s_anc, n_anc))
         print(
             f"{c:>5} {v.size:>7} {p_env:9.5f} {p10:8.5f} {med:8.5f}  | "
-            f"{p_env:.5f} nm  {p_env / (window_nm / main_w):6.2f} px  "
+            f"{p_env:.5f} nm  {p_env / px_nm:6.2f} px  "
             f"{p_env / ref_nm_per_bin:6.2f}"
             + (f"  | anchored {s_anc:.5f} nm ({n_anc} labeled)" if n_anc else "")
         )
@@ -258,31 +296,60 @@ def main():
             f"chord spread (p10-p90) {np.percentile(env[good], 10):.5f}-"
             f"{np.percentile(env[good], 90):.5f} nm"
         )
-        if (env[good] / (window_nm / main_w) < 0.5).any():
-            print("WARNING: sigma below 0.5 px on some chords -> noise-limited; raise --snr-min")
+        if (env[good] / px_nm < 0.5).any():
+            print(
+                "WARNING: sigma below 0.5 px on some chords -> noise-limited; raise "
+                "--snr-min"
+            )
         anc = np.array([r[5] for r in rows])
         ga = np.isfinite(anc)
         if ga.any():
+            s_anc = np.median(anc[ga])
+            ratio = np.median(env[good]) / s_anc
             print(
                 f"label-anchored (median sigma_obs^2 - T_i/K): sigma_inst = "
-                f"{np.median(anc[ga]):.5f} nm = {np.median(anc[ga]) / ref_nm_per_bin:.2f} "
-                f"reference bins; envelope/anchored = {np.median(env[good]) / np.median(anc[ga]):.2f} "
-                f"(>1: the coldest frames are not cold enough for the envelope)"
+                f"{s_anc:.5f} nm = {s_anc / ref_nm_per_bin:.2f} reference bins; "
+                f"envelope/anchored = {ratio:.2f} "
+                "(>1: the coldest frames are not cold enough for the envelope)"
             )
     if args.csv is not None:
         args.csv.parent.mkdir(parents=True, exist_ok=True)
         with open(args.csv, "w", newline="") as fh:
             w = csv.writer(fh)
             w.writerow(
-                ["machine", "chord", "n_frames", "sigma_inst_nm", "sigma_p10_nm",
-                 "sigma_median_nm", "sigma_inst_refbins", "sigma_anchored_nm",
-                 "n_labeled", "percentile", "snr_min", "window_nm", "native_bins"]
+                [
+                    "machine",
+                    "chord",
+                    "n_frames",
+                    "sigma_inst_nm",
+                    "sigma_p10_nm",
+                    "sigma_median_nm",
+                    "sigma_inst_refbins",
+                    "sigma_anchored_nm",
+                    "n_labeled",
+                    "percentile",
+                    "snr_min",
+                    "nm_per_px",
+                    "native_bins",
+                ]
             )
             for c, n, p_env, p10, med, s_anc, n_anc in rows:
                 w.writerow(
-                    [machine.name, c, n, p_env, p10, med,
-                     p_env / ref_nm_per_bin if np.isfinite(p_env) else np.nan,
-                     s_anc, n_anc, args.percentile, args.snr_min, window_nm, main_w]
+                    [
+                        machine.name,
+                        c,
+                        n,
+                        p_env,
+                        p10,
+                        med,
+                        p_env / ref_nm_per_bin if np.isfinite(p_env) else np.nan,
+                        s_anc,
+                        n_anc,
+                        args.percentile,
+                        args.snr_min,
+                        px_nm,
+                        main_w,
+                    ]
                 )
         print(f"wrote {args.csv}")
 

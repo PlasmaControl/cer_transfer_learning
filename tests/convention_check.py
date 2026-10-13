@@ -1,6 +1,7 @@
-"""Check that the metadata-derived DIII-D convention puts a spectral line of a
-given wavelength on the same pixel, with the same width, as on NSTX
-(needs PyTorch; CPU, seconds).
+"""Check the metadata-derived DIII-D wavelength convention against NSTX.
+
+A spectral line of a given wavelength must land on the same pixel, with the
+same width, as on NSTX (needs PyTorch; CPU, seconds).
 
     python -m tests.convention_check
 """
@@ -41,12 +42,18 @@ def main():
     import argparse
 
     ap = argparse.ArgumentParser()
-    ap.add_argument("--machine", default="d3d_tangential_meta",
-                    help="DIII-D convention to test on the 532 -> 526 nm / 536-bin grid")
+    ap.add_argument(
+        "--machine",
+        default="d3d_tangential_meta",
+        help="DIII-D convention to test on the 532 -> 526 nm / 536-bin grid",
+    )
     args = ap.parse_args()
     d3d = get_machine(args.machine)
-    print(f"testing {d3d.name}: flip {d3d.wavelength_flip}, stretch {d3d.wavelength_scale}, "
-          f"shift {d3d.wavelength_shift}, rest pixel {d3d.rest_pixel}")
+    print(
+        f"testing {d3d.name}: flip {d3d.wavelength_flip}, stretch "
+        f"{d3d.wavelength_scale}, "
+        f"shift {d3d.wavelength_shift}, rest pixel {d3d.rest_pixel}"
+    )
     pre_n = Preprocessor(get_machine("nstx"), 256)
     pre_d = Preprocessor(d3d, 256)
     worst = 0.0
@@ -57,7 +64,8 @@ def main():
     wn, wd = _fwhm(pre_n(_line(LAM_NSTX, 529.05))), _fwhm(pre_d(_line(LAM_D3D, 529.05)))
     rest = _peak(pre_n(_line(LAM_NSTX, 529.05)))
     print(
-        f"worst pixel offset {worst:.2f} | FWHM NSTX {wn} px, DIII-D {wd} px | C VI at {rest:.1f}"
+        f"worst pixel offset {worst:.2f} | FWHM NSTX {wn} px, DIII-D {wd} px | C VI "
+        f"at {rest:.1f}"
     )
     assert worst < 1.0, "line positions differ by more than one pixel"
     assert abs(wn - wd) <= 1, "line widths differ"
