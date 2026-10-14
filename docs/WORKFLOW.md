@@ -10,7 +10,7 @@ hand-run evaluations are for looking, never for the manuscript.
 
 | | |
 |---|---|
-| data root | `.env.fixed` -> `/scratch/gpfs/EKOLEMEN/ps9551/data_root_fixed`; DIII-D -> `/scratch/gpfs/NSTX-U/passive_micer/fixed/{training_set_30,test_set_30}` (one grid 532 -> 526 nm / 536 bins, uint16, t01-t48; 11 shots excluded: `splits/d3d_fixed_excluded.txt`); NSTX folders identical to track A |
+| data root | `.env.fixed` -> `/scratch/gpfs/EKOLEMEN/ps9551/data_root_fixed`; DIII-D -> `/scratch/gpfs/EKOLEMEN/ps9551/passive_micer/fixed/{training_set_30,test_set_30}` (one grid 532 -> 526 nm / 536 bins, uint16, t01-t48; 11 shots excluded: `splits/d3d_fixed_excluded.txt`); NSTX folders identical to track A |
 | figure-only NSTX files | `chers_set5/chers_<shot>.joblib` (+ `time_s`, `nbi_power_MW`) and `chers_set5/efit_<shot>.joblib` for 137711, 116939, 115600, 142239, 135660; list `splits/nstx_set5.txt`; symlinked into both data roots |
 | how the DIII-D data were made | `cer_transfer.datasets.reprocess_d3d` from the raw H5 (`passive_micer/raw`), per-chord time interpolation at t0 + 5 i ms, lag-checked against the old files (`fixed/reprocess_*.csv`) |
 | DIII-D convention | `d3d_tangential_fixed` (2.842 / -29 / 104.6, metadata only; `tests/convention_check.py --machine d3d_tangential_fixed`) |

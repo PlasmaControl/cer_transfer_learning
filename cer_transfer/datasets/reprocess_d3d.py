@@ -58,7 +58,7 @@ re-read and compared before being renamed. Re-runs skip existing outputs.
 
     pixi run --frozen python -u -m cer_transfer.datasets.reprocess_d3d \
         --dirs training_set_30 test_set_30 \
-        --raw-dir /scratch/gpfs/NSTX-U/passive_micer/raw \
+        --raw-dir /scratch/gpfs/EKOLEMEN/ps9551/passive_micer/raw \
         --out-root /scratch/gpfs/EKOLEMEN/ps9551/data_root_fixed \
         [--shard 0 --n-shards 20] [--fit-old-axis --limit 20] [--dry-run]
 
