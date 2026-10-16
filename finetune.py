@@ -105,6 +105,13 @@ def main():
         "head type, e.g. nstx -> nstxu)",
     )
     p.add_argument(
+        "--non-causal",
+        action="store_true",
+        help="original non-causal target model: time convolutions, pools, GroupNorm "
+        "and the preprocessing offset also use future frames (not real-time "
+        "capable)",
+    )
+    p.add_argument(
         "--moment-features",
         action="store_true",
         help="enable moment-feature readouts on the TARGET model "
@@ -197,6 +204,9 @@ def main():
             cfg_dict["head_type"] = args.head_type
         if args.moment_features:
             cfg_dict["moment_features"] = True
+        # causality is a property of the target model, not inherited: the
+        # weights of a non-causal source transfer unchanged (same shapes)
+        cfg_dict["causal"] = not args.non_causal
         model_cfg = ModelConfig(**cfg_dict)
         src_machine = ckpt["machine"]["name"]
         if (
@@ -287,6 +297,7 @@ def main():
         tail_oversample=args.tail_oversample,
         zero_dark_frames=args.zero_dark_frames,
         resample_w=model_cfg.resample_w,
+        causal=model_cfg.causal,
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"

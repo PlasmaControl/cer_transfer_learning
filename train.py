@@ -85,6 +85,7 @@ def make_loaders(
     resample_w=None,
     mirror_p: float = 0.0,
     stretch_aug=None,
+    causal: bool = True,
 ):
     """Build train/val DataLoaders from lists or directories for a machine."""
     train_files = resolve_files(train_dir, train_list, machine.train_dir, "train")
@@ -99,9 +100,15 @@ def make_loaders(
         resample_w=resample_w,
         mirror_p=mirror_p,
         stretch_aug=stretch_aug,
+        causal=causal,
     )
     val_set = ShotDataset(
-        val_files, machine, subseq_len=-1, mmap=mmap, resample_w=resample_w
+        val_files,
+        machine,
+        subseq_len=-1,
+        mmap=mmap,
+        resample_w=resample_w,
+        causal=causal,
     )
     gen = torch.Generator().manual_seed(train_cfg.seed)
     # persistent_workers: keep workers (and their cached file handles)
@@ -286,6 +293,13 @@ def main():
         help="resample the wavelength axis to this many bins in preprocessing",
     )
     p.add_argument(
+        "--non-causal",
+        action="store_true",
+        help="original non-causal model: time convolutions, pools, GroupNorm "
+        "and the preprocessing offset also use future frames (not real-time "
+        "capable)",
+    )
+    p.add_argument(
         "--moment-features",
         action="store_true",
         help="feed classical spectral moments (amplitude, "
@@ -351,6 +365,7 @@ def main():
         chord_attention=args.chord_attention,
         chord_attention_depth=args.chord_attention_depth,
         resample_w=args.resample_w,
+        causal=not args.non_causal,
     )
 
     # On --resume the checkpoint's stored model_config is authoritative:
@@ -459,6 +474,7 @@ def main():
         resample_w=model_cfg.resample_w,
         mirror_p=args.mirror_augment,
         stretch_aug=args.stretch_augment,
+        causal=model_cfg.causal,
     )
 
     loggers = [CSVLogger(args.checkpoint.with_suffix(".metrics.csv"))]

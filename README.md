@@ -123,6 +123,18 @@ changing `pixi.toml`, run `pixi install` on a login node first.
 Checkpoints for sharing are exported without optimizer state (about 16 MB):
 `python -m cer_transfer.inference cer_ckpts/nstx_ft.pt nstx_ft_inference.pt`.
 
+## Real-time operation
+
+Models are causal by default (`ModelConfig.causal`): the prediction for frame t
+uses only input frames up to t, so the network can run in real time, frame by
+frame. Time convolutions and max-pools are padded on the past side only,
+GroupNorm normalizes each frame separately, and preprocessing subtracts the
+running minimum of the spectra instead of the minimum over the whole sequence.
+`--non-causal` (train.py, finetune.py) restores the original model. Checkpoints
+saved before this option existed load as non-causal; their weights fine-tune
+into a causal model unchanged (`finetune.py` builds a causal target unless told
+otherwise). `pixi run test-causal` checks every architecture variant.
+
 ## Workflows
 
 **Pre-training** (`slurm/pretrain_transfer_source.sbatch`):

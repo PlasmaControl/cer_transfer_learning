@@ -170,7 +170,8 @@ def cmd_recon(args):
     ckpt = load_checkpoint(args.checkpoint)
     mk = ckpt["machine"]
     machine = get_machine(mk["name"] if isinstance(mk, dict) else mk)
-    model = build_model(machine, ModelConfig(**ckpt["model_config"]))
+    cfg = ModelConfig(**ckpt["model_config"])
+    model = build_model(machine, cfg)
     model.load_state_dict(ckpt["model_state"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device).eval()
@@ -181,7 +182,14 @@ def cmd_recon(args):
         for ln in args.list.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
-    ds = ShotDataset([files[args.shot_index]], machine, subseq_len=-1, mmap=False)
+    ds = ShotDataset(
+        [files[args.shot_index]],
+        machine,
+        subseq_len=-1,
+        mmap=False,
+        resample_w=cfg.resample_w,
+        causal=cfg.causal,
+    )
     spec, tgt_t, err_t, mom_t = ds[0]
     with torch.no_grad():
         mu_n, sigma_n = model(

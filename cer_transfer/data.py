@@ -26,12 +26,14 @@ class Preprocessor:
 
     Steps:
 
-      1. offset removal: per-channel minimum over the WHOLE subsequence
-         (axes T and W together) — i.e. `x -= x.min(axis=(1, 2)) - 1`.
-         NOTE: this makes preprocessing depend on the subsequence a
-         timestep lands in (train chunks vs full-shot validation see
-         slightly different offsets); kept deliberately to match the
-         original, empirically fast/validated pipeline.
+      1. offset removal: per-channel minimum, `x -= offset - 1`.
+         causal=True (real time): the running minimum over W and all frames
+         up to the current one, so frame t never depends on later frames.
+         causal=False (original pipeline): one minimum over the WHOLE
+         subsequence (axes T and W together), i.e. it uses future frames.
+         NOTE: either way the offset depends on where the subsequence
+         starts (train chunks vs full-shot validation see slightly
+         different offsets).
       2. log10 in torch on CPU (torch.log10 is faster than np.log10 in
          dataloader workers).
 
@@ -46,8 +48,10 @@ class Preprocessor:
         w_scale: float = 1.0,
         flip_w: bool = False,
         w_shift: float = 0.0,
+        causal: bool = True,
     ):
         self.baseline_region = machine.baseline_region
+        self.causal = causal
         self.resample_w = resample_w
         # axis-convention probes for zero-shot transfer: stretch the
         # wavelength axis by w_scale (resample to w_scale * resample_w bins,
@@ -64,11 +68,15 @@ class Preprocessor:
     def __call__(self, spec: np.ndarray) -> torch.Tensor:
         """spec: (C, T, W) float array -> log10 spectrogram tensor."""
         t = torch.from_numpy(spec)
+        base = t
         if self.baseline_region is not None:
             lo, hi = self.baseline_region
-            offset = torch.amin(t[..., lo:hi], dim=(1, 2), keepdim=True)
+            base = t[..., lo:hi]
+        if self.causal:
+            # running minimum over frames <= t, per channel: (C, T, 1)
+            offset = torch.cummin(base.amin(dim=-1), dim=1).values.unsqueeze(-1)
         else:
-            offset = torch.amin(t, dim=(1, 2), keepdim=True)  # per channel
+            offset = torch.amin(base, dim=(1, 2), keepdim=True)  # per channel
         t = t - (offset - 1.0)
         t = torch.log10(t)
         if self.flip_w:
@@ -127,8 +135,12 @@ class ShotDataset(Dataset):
         w_shift: float = 0.0,
         mirror_p: float = 0.0,
         stretch_aug: Optional[tuple] = None,
+        causal: bool = True,
     ):
         """Index the discharge files of one split.
+
+        causal: real-time preprocessing (see ``Preprocessor``); pass the
+        model's ``ModelConfig.causal``.
 
         mmap=True: memory-map files, materialize slices via page faults
         (random small reads — latency-bound on GPFS). mmap=False: read each
@@ -141,7 +153,9 @@ class ShotDataset(Dataset):
         self.machine = machine
         self.subseq_len = subseq_len
         self.mmap = mmap
-        self.preprocess = Preprocessor(machine, resample_w, w_scale, flip_w, w_shift)
+        self.preprocess = Preprocessor(
+            machine, resample_w, w_scale, flip_w, w_shift, causal
+        )
         # mirror augmentation (training only): reflect the resampled spectrum
         # about the rest pixel and negate v_tor -- the same plasma rotating the
         # other way, so both rotation directions are covered equally

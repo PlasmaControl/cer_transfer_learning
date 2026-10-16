@@ -210,6 +210,11 @@ class ModelConfig:
     # interpolation), so spectrometers with different resolution share a
     # pixel scale. None keeps the native axis.
     resample_w: Optional[int] = None
+    # Real-time operation: the prediction for frame t uses input frames <= t
+    # only (causal convolutions/pools, per-frame GroupNorm, running-minimum
+    # offset in preprocessing). Checkpoints saved before this field existed
+    # are non-causal and load with causal=False (training.load_checkpoint).
+    causal: bool = True
 
 
 @dataclass(frozen=True)

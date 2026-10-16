@@ -91,6 +91,7 @@ def predict_file(m: SimpleNamespace, path) -> SimpleNamespace:
         subseq_len=-1,
         mmap=False,
         resample_w=m.config.resample_w,
+        causal=m.config.causal,
     )
     spec, tgt, err, moments = ds[0]
     mu_n, sigma_n = m.model(

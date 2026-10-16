@@ -102,7 +102,11 @@ def load_checkpoint(path: Path, map_location="cpu") -> dict:
         ``scheduler_state`` and ``finished``.
 
     """
-    return torch.load(path, map_location=map_location, weights_only=False)
+    ckpt = torch.load(path, map_location=map_location, weights_only=False)
+    if isinstance(ckpt.get("model_config"), dict):
+        # saved before ModelConfig.causal existed: a non-causal model
+        ckpt["model_config"].setdefault("causal", False)
+    return ckpt
 
 
 def mark_finished(path: Path, reason: str) -> None:

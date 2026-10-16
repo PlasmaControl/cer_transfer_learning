@@ -158,6 +158,7 @@ def main():
         w_scale=args.w_scale,
         flip_w=args.flip_w,
         w_shift=args.w_shift,
+        causal=cfg.causal,
     )
 
     n_t = len(machine.targets)

@@ -10,6 +10,16 @@ output layers. This replaces the old ModuleList of full per-chord heads
 (~80x duplicated feature refinement) with a shared representation and a
 cheap per-chord readout.
 
+Causality (``ModelConfig.causal``, default on): every operation along the
+time axis looks only at the current and past frames, so the prediction for
+frame t depends on input frames <= t and the model can run in real time.
+Convolutions and max-pools are padded on the past side only, and GroupNorm
+normalizes each frame separately (over channels and wavelength) instead of
+over the whole sequence. Parameter names and shapes are those of the
+non-causal model, so either kind of checkpoint loads into either variant.
+BatchNorm is causal in eval mode (running statistics); in training it uses
+batch statistics as usual.
+
 Extension point (geometry conditioning): to share a single head across
 machines, replace the per-chord Linear list with one Linear conditioned on
 a chord-geometry embedding (R, tangency angle, ...) concatenated to the
@@ -25,12 +35,96 @@ import torch.nn.functional as F
 from .configs import MachineConfig, ModelConfig
 
 
-def _norm2d(kind: str, channels: int) -> nn.Module:
+class FrameGroupNorm(nn.GroupNorm):
+    """GroupNorm with statistics per frame: over (channels, W), never over T.
+
+    Same parameters as ``nn.GroupNorm``, so state dicts are interchangeable.
+    """
+
+    def forward(self, x):
+        """Normalize (B, C, T, W) frame by frame."""
+        b, c, t, w = x.shape
+        y = super().forward(x.permute(0, 2, 1, 3).reshape(b * t, c, 1, w))
+        return y.reshape(b, t, c, w).permute(0, 2, 1, 3)
+
+
+class CausalConv2d(nn.Conv2d):
+    """Conv2d over (B, C, T, W) padded on the past side of the time axis only.
+
+    Output frame t sees input frames t - (k_t - 1) .. t. The wavelength axis
+    keeps its symmetric padding. Same parameters as ``nn.Conv2d``.
+    """
+
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, bias=True):
+        kt, kw = (
+            kernel_size
+            if isinstance(kernel_size, tuple)
+            else (kernel_size, kernel_size)
+        )
+        super().__init__(
+            in_channels,
+            out_channels,
+            (kt, kw),
+            stride=stride,
+            padding=(0, kw // 2),
+            bias=bias,
+        )
+        self.time_pad = kt - 1
+
+    def forward(self, x):
+        """Convolve (B, C, T, W); the output keeps T (stride 1 in time)."""
+        return super().forward(F.pad(x, (0, 0, self.time_pad, 0)))
+
+
+class CausalMaxPool2d(nn.Module):
+    """Max-pool with a window over the current and past frames only.
+
+    Counterpart of ``nn.MaxPool2d(kernel_size=(kt, f), stride=(1, f),
+    padding=((kt - 1) // 2, 0))`` with the time window shifted into the past.
+    """
+
+    def __init__(self, kernel_size, stride):
+        super().__init__()
+        self.time_pad = kernel_size[0] - 1
+        self.pool = nn.MaxPool2d(kernel_size=kernel_size, stride=stride)
+
+    def forward(self, x):
+        """Pool (B, C, T, W); T is preserved."""
+        x = F.pad(x, (0, 0, self.time_pad, 0), value=float("-inf"))
+        return self.pool(x)
+
+
+def _conv2d(
+    in_channels, out_channels, kernel_size, causal, stride=1, bias=True
+) -> nn.Module:
+    """Convolution preserving T (and W at stride 1); causal in T if asked."""
+    if causal:
+        return CausalConv2d(in_channels, out_channels, kernel_size, stride, bias)
+    padding = (
+        tuple(k // 2 for k in kernel_size)
+        if isinstance(kernel_size, tuple)
+        else kernel_size // 2
+    )
+    return nn.Conv2d(
+        in_channels, out_channels, kernel_size, stride, padding=padding, bias=bias
+    )
+
+
+def _maxpool_t3(w_factor: int, causal: bool) -> nn.Module:
+    """Max-pool over 3 frames that divides W by ``w_factor``."""
+    if causal:
+        return CausalMaxPool2d(kernel_size=(3, w_factor), stride=(1, w_factor))
+    return nn.MaxPool2d(
+        kernel_size=(3, w_factor), stride=(1, w_factor), padding=(1, 0)
+    )
+
+
+def _norm2d(kind: str, channels: int, causal: bool = False) -> nn.Module:
     if kind == "batch":
         return nn.BatchNorm2d(channels)
     if kind == "group":
         groups = 8 if channels % 8 == 0 else 1
-        return nn.GroupNorm(groups, channels)
+        return (FrameGroupNorm if causal else nn.GroupNorm)(groups, channels)
     raise ValueError(f"unknown norm '{kind}'")
 
 
@@ -48,27 +142,28 @@ class ResidualBlock(nn.Module):
         Convolution bias.
     norm : {'group', 'batch'}, default='group'
         Normalization layer after each convolution.
+    causal : bool, default=False
+        Use only current and past frames (see module docstring).
 
     """
 
     def __init__(
-        self, in_channels, out_channels, kernel_size=3, bias=True, norm="group"
+        self,
+        in_channels,
+        out_channels,
+        kernel_size=3,
+        bias=True,
+        norm="group",
+        causal=False,
     ):
         super().__init__()
-        padding = (
-            tuple(k // 2 for k in kernel_size)
-            if isinstance(kernel_size, tuple)
-            else kernel_size // 2
-        )
-        self.conv1 = nn.Conv2d(
-            in_channels, out_channels, kernel_size, padding=padding, bias=bias
-        )
-        self.norm1 = _norm2d(norm, out_channels)
+        self.conv1 = _conv2d(in_channels, out_channels, kernel_size, causal, bias=bias)
+        self.norm1 = _norm2d(norm, out_channels, causal)
         self.act = nn.LeakyReLU(0.1, inplace=True)
-        self.conv2 = nn.Conv2d(
-            out_channels, out_channels, kernel_size, padding=padding, bias=bias
+        self.conv2 = _conv2d(
+            out_channels, out_channels, kernel_size, causal, bias=bias
         )
-        self.norm2 = _norm2d(norm, out_channels)
+        self.norm2 = _norm2d(norm, out_channels, causal)
         self.skip = (
             nn.Conv2d(in_channels, out_channels, 1, bias=bias)
             if in_channels != out_channels
@@ -114,22 +209,17 @@ class Backbone(nn.Module):
         self.out_width = out_width
         widths = [n_input_channels, *cfg.encoder_widths, out_width]
 
+        causal = cfg.causal
+
         def block(w_in, w_out, w_pool=1):
             """w_pool: number of W-halvings in this block (0 = keep W)."""
-            layers = [
-                ResidualBlock(w_in, w_out, cfg.kernel_size, cfg.bias, cfg.norm),
+            return [
+                ResidualBlock(
+                    w_in, w_out, cfg.kernel_size, cfg.bias, cfg.norm, causal
+                ),
                 nn.Dropout(cfg.dropout),
+                _maxpool_t3(2**w_pool, causal),
             ]
-            if w_pool > 0:
-                f = 2**w_pool
-                layers.append(
-                    nn.MaxPool2d(kernel_size=(3, f), stride=(1, f), padding=(1, 0))
-                )
-            else:
-                layers.append(
-                    nn.MaxPool2d(kernel_size=(3, 1), stride=(1, 1), padding=(1, 0))
-                )
-            return layers
 
         self.agnostic = cfg.agnostic
         if cfg.agnostic:
@@ -160,11 +250,11 @@ class Backbone(nn.Module):
                 sw = cfg.agnostic_stem_width
                 k = cfg.kernel_size
                 self.stem = nn.Sequential(
-                    nn.Conv2d(1, sw, k, stride=(1, 2), padding=k // 2, bias=cfg.bias),
-                    _norm2d(cfg.norm, sw),
+                    _conv2d(1, sw, k, causal, stride=(1, 2), bias=cfg.bias),
+                    _norm2d(cfg.norm, sw, causal),
                     nn.GELU(),
-                    nn.MaxPool2d(kernel_size=(3, 2), stride=(1, 2), padding=(1, 0)),
-                    ResidualBlock(sw, sw, k, cfg.bias, cfg.norm),
+                    _maxpool_t3(2, causal),
+                    ResidualBlock(sw, sw, k, cfg.bias, cfg.norm, causal),
                     nn.Dropout(cfg.dropout),
                 )
                 self.chord_merge = nn.Conv2d(sw, widths[1], 1, bias=cfg.bias)
@@ -215,12 +305,8 @@ class Backbone(nn.Module):
             self.n_pools = stem_w_pools + min(cfg.trunk_w_pools, n_trunk)
         self.hidden_dim = cfg.hidden_dim
         self.pool = nn.AdaptiveAvgPool2d((None, cfg.hidden_dim))
-        self.refine = nn.Conv2d(
-            out_width,
-            out_width,
-            cfg.kernel_size,
-            padding=cfg.kernel_size // 2,
-            bias=cfg.bias,
+        self.refine = _conv2d(
+            out_width, out_width, cfg.kernel_size, causal, bias=cfg.bias
         )
 
     def forward(self, x):
@@ -326,6 +412,7 @@ class SharedTrunkHead(nn.Module):
             cfg.kernel_size,
             cfg.bias,
             cfg.norm,
+            cfg.causal,
         )
         feat = n_backbone_channels * cfg.hidden_dim
         self.trunk_mlp = nn.Sequential(
@@ -431,7 +518,12 @@ class FullChordHead(nn.Module):
         def __init__(self, n_channels, cfg: ModelConfig, n_targets: int):
             super().__init__()
             self.conv = ResidualBlock(
-                n_channels, n_channels, cfg.kernel_size, cfg.bias, cfg.norm
+                n_channels,
+                n_channels,
+                cfg.kernel_size,
+                cfg.bias,
+                cfg.norm,
+                cfg.causal,
             )
             feat = n_channels * cfg.hidden_dim
             self.mlp = nn.Sequential(

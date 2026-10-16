@@ -70,7 +70,12 @@ def main():
     if args.limit:
         files = files[: args.limit]
     ds = ShotDataset(
-        files, machine, subseq_len=-1, mmap=False, resample_w=cfg.resample_w
+        files,
+        machine,
+        subseq_len=-1,
+        mmap=False,
+        resample_w=cfg.resample_w,
+        causal=cfg.causal,
     )
     print(
         f"checkpoint: {args.checkpoint.name} (machine={machine.name}); "
