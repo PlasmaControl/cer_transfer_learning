@@ -19,6 +19,7 @@
 # (CER_DATA_ROOT=.../data_root_fixed), the regular .env stays untouched.
 #   sbatch slurm/pretrain_fixed_d3d.sbatch
 #   RECIPE=plain sbatch ... for the baseline without the transfer augmentations
+# The model is causal (real-time capable; ModelConfig.causal).
 module purge
 export PATH="$HOME/.pixi/bin:$PATH"
 cd "${SLURM_SUBMIT_DIR:-.}"; [ -f train.py ] || cd ..   # repo root (submit from root or slurm/)
@@ -32,7 +33,10 @@ case "$CER_DATA_ROOT" in *fixed*) ;; *) echo "CER_DATA_ROOT=$CER_DATA_ROOT does 
 RUN="pixi run --frozen"
 
 RECIPE=${RECIPE:-transfer}
-OUT=cer_ckpts/d3d_fixed_dg.pt; [ "$RECIPE" = plain ] && OUT=cer_ckpts/d3d_fixed_plain.pt
+# causal (real-time) model: its own checkpoint, so --resume never picks up the
+# non-causal d3d_fixed_{dg,plain}.pt; OUT=... overrides
+DEFAULT_OUT=cer_ckpts/d3d_fixed_dg_rt.pt; [ "$RECIPE" = plain ] && DEFAULT_OUT=cer_ckpts/d3d_fixed_plain_rt.pt
+OUT=${OUT:-$DEFAULT_OUT}
 AUG="--randconv randconv --randconv-max-shift 30 --consistency-w 5 --mirror-augment 0.5"
 [ "$RECIPE" = plain ] && AUG=""
 RESUME=""; [ -f "$OUT" ] && RESUME="--resume"   # requeue: continue from the saved checkpoint
