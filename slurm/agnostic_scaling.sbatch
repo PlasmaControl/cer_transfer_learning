@@ -26,6 +26,9 @@
 #   sbatch --array=0-6 --export=ALL,MODE=finetune,SRC=cer_ckpts/d3d_full_dg.pt slurm/agnostic_scaling.sbatch
 #   sbatch --array=1-6 --export=ALL,MODE=scratch,SHIFT=30 slurm/agnostic_scaling.sbatch
 #   sbatch --array=1-6 --export=ALL,MODE=scratch,RECIPE=plain slurm/agnostic_scaling.sbatch
+#   error bars: SEED=1 (and 2, ...) with --array=1-6 trains every rung on draw n of the
+#     subset with training seed 42+n (K=full: training seed only); make_figs collects
+#     *_r<K>_s*.metrics.csv into mean +- std
 #   track B: sbatch --array=0-6 --export=ALL,ENV=.env.fixed,MODE=finetune,SRC=cer_ckpts/d3d_fixed_plain_best.pt,PREFIX=nstx_fixed_ft slurm/agnostic_scaling.sbatch
 module purge
 export PATH="$HOME/.pixi/bin:$PATH"
@@ -39,7 +42,12 @@ elif [ "$MODE" = scratch ]; then PREFIX=${PREFIX:-nstx_agn_scratch}; else
 SHIFT=${SHIFT:-30}   # random-shift range of the recipe (must match the DIII-D model)
 RUNGS=(0 325 650 1300 2600 5200 full)
 K=${RUNGS[${SLURM_ARRAY_TASK_ID:-0}]}
-TAG=${PREFIX}_r${K}
+# SEED=n: repeated draw n of the subset (splits/nstx_train_r<K>_s<n>.txt from draw_subsets)
+# AND training seed 42+n, tag _s<n>; for K=full there is nothing to redraw, so only the
+# training seed changes (variance of the training itself)
+SEED=${SEED:-}
+TAG=${PREFIX}_r${K}${SEED:+_s$SEED}
+SEEDFLAG=""; [ -n "$SEED" ] && SEEDFLAG="--seed $((42 + SEED))"
 [ "$K" = 0 ] && TAG=${PREFIX}_zero_shot
 LOG="slurm/logs/${SLURM_JOB_NAME}_${TAG}"
 exec >>"$LOG.out" 2>>"$LOG.err"
@@ -50,7 +58,7 @@ RUN="pixi run --frozen"
 [ "$MODE" = scratch ] || [ -f "$SRC" ] || { echo "missing $SRC"; exit 1; }
 
 if [ "$MODE" = scratch ]; then
-  LIST=splits/nstx_train_r$K.txt; [ "$K" = full ] && LIST=splits/nstx_train.txt
+  LIST=splits/nstx_train_r$K${SEED:+_s$SEED}.txt; [ "$K" = full ] && LIST=splits/nstx_train.txt
   N=$(grep -cv '^#' "$LIST")
   CKPT=cer_ckpts/$TAG.pt; MFLAG=""
   RESUME=""; [ -f "$CKPT" ] && RESUME="--resume"   # requeue: continue; finished runs are skipped
@@ -58,7 +66,7 @@ if [ "$MODE" = scratch ]; then
   AUG="--randconv randconv --randconv-max-shift $SHIFT --consistency-w 5 --mirror-augment 0.5"
   [ "$RECIPE" = plain ] && AUG=""   # same architecture, no transfer augmentations
   echo "=== $TAG: train from scratch on $N NSTX discharges (recipe: $RECIPE${AUG:+, $AUG})"
-  srun $RUN python -u train.py $RESUME --machine nstx --checkpoint "$CKPT" \
+  srun $RUN python -u train.py $RESUME $SEEDFLAG --machine nstx --checkpoint "$CKPT" \
       --train-list $LIST --val-list splits/nstx_val.txt --epochs 300 \
       --agnostic --chord-attention --chord-attention-depth 2 --resample-w 256 \
       --feature-width 128 --hidden-dim 8 --kernel-size 3 --head-type mlp --norm group \
@@ -70,13 +78,13 @@ if [ "$MODE" = scratch ]; then
 elif [ "$K" = 0 ]; then
   CKPT=$SRC; MFLAG="--machine nstx"; N=0
 else
-  LIST=splits/nstx_train_r$K.txt; [ "$K" = full ] && LIST=splits/nstx_train.txt
+  LIST=splits/nstx_train_r$K${SEED:+_s$SEED}.txt; [ "$K" = full ] && LIST=splits/nstx_train.txt
   N=$(grep -cv '^#' "$LIST")
   CKPT=cer_ckpts/$TAG.pt; MFLAG=""
   RESUME=""; [ -f "$CKPT" ] && RESUME="--resume"   # requeue: continue; finished runs are skipped
   trap 'echo "USR1: requeue"; scontrol requeue $SLURM_JOB_ID' USR1
   echo "=== $TAG: fine-tune $SRC on $N NSTX discharges"
-  srun $RUN python -u finetune.py $RESUME \
+  srun $RUN python -u finetune.py $RESUME $SEEDFLAG \
       --source-checkpoint "$SRC" --machine nstx --checkpoint "$CKPT" \
       --train-list $LIST --val-list splits/nstx_val.txt \
       --subseq-len 64 --batch-size 32 --accumulation-steps 8 --num-workers 8 \

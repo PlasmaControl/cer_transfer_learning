@@ -170,8 +170,7 @@ def cmd_recon(args):
     ckpt = load_checkpoint(args.checkpoint)
     mk = ckpt["machine"]
     machine = get_machine(mk["name"] if isinstance(mk, dict) else mk)
-    cfg = ModelConfig(**ckpt["model_config"])
-    model = build_model(machine, cfg)
+    model = build_model(machine, ModelConfig(**ckpt["model_config"]))
     model.load_state_dict(ckpt["model_state"])
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model = model.to(device).eval()
@@ -182,14 +181,7 @@ def cmd_recon(args):
         for ln in args.list.read_text().splitlines()
         if ln.strip() and not ln.strip().startswith("#")
     ]
-    ds = ShotDataset(
-        [files[args.shot_index]],
-        machine,
-        subseq_len=-1,
-        mmap=False,
-        resample_w=cfg.resample_w,
-        causal=cfg.causal,
-    )
+    ds = ShotDataset([files[args.shot_index]], machine, subseq_len=-1, mmap=False)
     spec, tgt_t, err_t, mom_t = ds[0]
     with torch.no_grad():
         mu_n, sigma_n = model(
@@ -343,10 +335,32 @@ def cmd_scaling(args):
         d = pd.read_csv(path)
         return float(d["val_score"].max())
 
-    runs = sorted((int(s.split(":")[0]), best(s.split(":", 1)[1])) for s in args.runs)
-    scr = [
-        (int(s.split(":")[0]), best(s.split(":", 1)[1])) for s in (args.scratch or [])
-    ]
+    def aggregate(specs):
+        """Group 'n:csv' specs by n: list of (n, mean, std, count), std=0 for one."""
+        by_n = {}
+        for sp in specs or []:
+            n, path = sp.split(":", 1)
+            by_n.setdefault(int(n), []).append(best(path))
+        out = []
+        for n in sorted(by_n):
+            v = np.asarray(by_n[n])
+            out.append(
+                (
+                    n,
+                    float(v.mean()),
+                    float(v.std(ddof=1)) if v.size > 1 else 0.0,
+                    v.size,
+                )
+            )
+        return out
+
+    runs_agg = aggregate(args.runs)
+    scr_agg = aggregate(args.scratch)
+    for n, m, sd, c in runs_agg + scr_agg:
+        if c > 1:
+            print(f"n={n}: {c} runs, mean {m:.3f} +- {sd:.3f}")
+    runs = [(n, m) for n, m, _, _ in runs_agg]
+    scr = [(n, m) for n, m, _, _ in scr_agg]
     agn = sorted(
         (int(s.split(":")[0]), best(s.split(":", 1)[1]))
         for s in (getattr(args, "agnostic_runs", None) or [])
@@ -371,27 +385,28 @@ def cmd_scaling(args):
         xs = sorted(
             {n for n, _ in runs} | {n for n, _ in agn} | {n for n, _ in agn_scr}
         )
-        ax.plot(
-            [n for n, _ in runs],
-            [v for _, v in runs],
-            "o-",
+        ax.errorbar(
+            [n for n, _, _, _ in runs_agg],
+            [m for _, m, _, _ in runs_agg],
+            yerr=[sd for _, _, sd, _ in runs_agg],
+            fmt="o-",
             color="C0",
             lw=1.8,
+            capsize=3,
             label=getattr(args, "runs_label", None) or "DIII-D+NSTX model",
         )
-        for i, (n, v) in enumerate(scr):
-            ax.plot(
-                [n],
-                [v],
-                "s",
+        if scr_agg:
+            ax.errorbar(
+                [n for n, _, _, _ in scr_agg],
+                [m for _, m, _, _ in scr_agg],
+                yerr=[sd for _, _, sd, _ in scr_agg],
+                fmt="s",
                 mfc="none",
                 color="C3",
                 ms=8,
-                label=(
-                    (getattr(args, "scratch_label", None) or "NSTX model")
-                    if i == 0
-                    else None
-                ),
+                capsize=3,
+                ls="none",
+                label=getattr(args, "scratch_label", None) or "NSTX model",
             )
         if agn:
             ax.plot(

@@ -170,7 +170,9 @@ FT=(); SC=()
 for k in 325 650 1300 2600 5200 full; do
   n=$k; [ $k = full ] && n=7307
   [ -f cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv ]      && FT+=("$n:cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv")
+  for f in cer_ckpts/${FTP:-nstx_agn_ft}_r${k}_s*.metrics.csv; do [ -f "$f" ] && FT+=("$n:$f"); done   # repeated draws -> error bars
   [ -f cer_ckpts/${SCP}_r$k.metrics.csv ] && SC+=("$n:cer_ckpts/${SCP}_r$k.metrics.csv")
+  for f in cer_ckpts/${SCP}_r${k}_s*.metrics.csv; do [ -f "$f" ] && SC+=("$n:$f"); done
 done
 Z=gallery/paper/zero_shot_val.csv
 if [ ${#FT[@]} -gt 0 ]; then
