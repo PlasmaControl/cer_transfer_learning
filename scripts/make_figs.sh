@@ -10,7 +10,7 @@
 #   gallery/137711/calibration.txt          output of cer_transfer.analysis.calibrate
 #                                           for that model (calibration factors k)
 #   gallery/e116939.npz gallery/e115600.npz events (same model)
-#   gallery/e116939_nstx_agn_ft_r325.npz gallery/e116939_nstx_agn_scratch_plain_r325.npz
+#   gallery/e116939_nstx_agn_ft_r325.npz gallery/e116939_${SCP}_r325.npz
 #                                           transfer at 325 discharges
 #   gallery/137711/passive.npz, active.npz  background vs foreground (unchanged models)
 #   beam-off examples: no dumps; the DIII-D agnostic model (cer_ckpts/d3d_full_dg.pt)
@@ -114,9 +114,10 @@ event gallery/e115600_scratch.npz 0.315 0.400 115600 event_tm_115600_scratch 1.0
 # --- Transfer at 325 discharges: fine-tuned vs from scratch in ONE figure ------
 # (manuscript include: event_transfer_r325_116939)
 FTP=${FTP:-nstx_agn_ft}   # ladder prefix (track B: nstx_fixed_ft)
-have gallery/e116939_${FTP}_r325.npz gallery/e116939_nstx_agn_scratch_plain_r325.npz $R/chords_Rtan_116939.csv && \
+SCP=${SCP:-nstx_scratch64}   # from-scratch baseline prefix
+have gallery/e116939_${FTP}_r325.npz gallery/e116939_${SCP}_r325.npz $R/chords_Rtan_116939.csv && \
 $RUN -m cer_transfer.figures.event_panels --preds gallery/e116939_${FTP}_r325.npz \
-    --preds2 gallery/e116939_nstx_agn_scratch_plain_r325.npz \
+    --preds2 gallery/e116939_${SCP}_r325.npz \
     --label1 "$NAME_FT_325" --label2 "$NAME_SCR_325" --no-reference \
     --t0 0.370 --t1 0.445 --t-offset $OFF --target ${EVENT_TARGET:-both} $T116939 --trace-x 1.10 --ylim -10 270 $(SF=$(shotany 116939); echo ${SF:+--shot $SF}) \
     $(EF="${EFIT_DIR:-${CER_DATA_ROOT:-.}/chers_set5}/efit_116939.joblib"; [ -f "$EF" ] && echo "--efit $EF") \
@@ -157,9 +158,9 @@ $RUN -m cer_transfer.figures.beamoff_examples --checkpoint $BO_CK --list $BO_LIS
 # DIII-D: the full-data DG run (frozen at its best epoch 44); NSTX: plain recipe, all discharges
 # DIII-D curve = the run of the paper's DIII-D model (track B: d3d_fixed_plain; track A: d3d_full_dg)
 D3D_METRICS=${D3D_METRICS:-cer_ckpts/d3d_fixed_plain.metrics.csv}; [ -f "$D3D_METRICS" ] || D3D_METRICS=cer_ckpts/d3d_full_dg.metrics.csv
-have $D3D_METRICS cer_ckpts/nstx_agn_scratch_plain_rfull.metrics.csv && \
+have $D3D_METRICS cer_ckpts/${SCP}_rfull.metrics.csv && \
 $RUN -m cer_transfer.figures.plots curves --csv $D3D_METRICS \
-    cer_ckpts/nstx_agn_scratch_plain_rfull.metrics.csv --labels "DIII-D (13151 shots) model" "NSTX (7307 shots) model" \
+    cer_ckpts/${SCP}_rfull.metrics.csv --labels "DIII-D (13143 shots) model" "NSTX (7307 shots) model" \
     --mark-best --drop-outliers --out figs --out-name learning_curves_val_score_baseline
 
 # --- Scaling figure: fine-tuned from DIII-D vs from scratch, zero-shot line ---
@@ -169,7 +170,7 @@ FT=(); SC=()
 for k in 325 650 1300 2600 5200 full; do
   n=$k; [ $k = full ] && n=7307
   [ -f cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv ]      && FT+=("$n:cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv")
-  [ -f cer_ckpts/nstx_agn_scratch_plain_r$k.metrics.csv ] && SC+=("$n:cer_ckpts/nstx_agn_scratch_plain_r$k.metrics.csv")
+  [ -f cer_ckpts/${SCP}_r$k.metrics.csv ] && SC+=("$n:cer_ckpts/${SCP}_r$k.metrics.csv")
 done
 Z=gallery/paper/zero_shot_val.csv
 if [ ${#FT[@]} -gt 0 ]; then

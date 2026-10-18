@@ -28,8 +28,9 @@ D3D=${D3D:-cer_ckpts/d3d_full_dg_e44.pt}
 NSTX=${NSTX:-cer_ckpts/nstx_agn_ft_rfull.pt}
 # ladder prefix follows the NSTX model name (nstx_agn_ft_rfull -> nstx_agn_ft; nstx_fixed_ft_rfull -> nstx_fixed_ft)
 FTP=$(basename "$NSTX" .pt); FTP=${FTP%_rfull}
+SCP=${SCP:-nstx_scratch64}   # from-scratch baseline prefix (subseq 64; nstx_agn_scratch_plain = the old subseq-256 runs)
 FT325=cer_ckpts/${FTP}_r325.pt
-SC325=cer_ckpts/nstx_agn_scratch_plain_r325.pt
+SC325=cer_ckpts/${SCP}_r325.pt
 # DIII-D convention of the zero-shot protocol: 1.4 for the old data (track A), 2.842 for the rebuilt files (track B)
 case "$(basename "$D3D")" in d3d_fixed*) STRETCH=2.842; SIGSRC=gallery/instrument_width_d3d_fixed.csv;; *) STRETCH=1.4; SIGSRC=gallery/instrument_width_d3d.csv;; esac
 case "$D3D$CER_DATA_ROOT" in *fixed*fixed*|*full_dg*data_root) ;; *) echo "D3D=$D3D does not match CER_DATA_ROOT=$CER_DATA_ROOT (track mix-up)"; exit 1;; esac
@@ -96,7 +97,7 @@ if have $NSTX && [ -n "$GPU" ]; then
     $RUN eval_checkpoint.py --checkpoint $NSTX --list $L --dump-preds $out 2>&1 | grep -E "overall" | sed "s/^/$shot: /"
   done
   # the same three discharges with the NSTX-only model (from scratch, all discharges): alternative figures
-  SCRF=cer_ckpts/nstx_agn_scratch_plain_rfull.pt
+  SCRF=cer_ckpts/${SCP}_rfull.pt
   if have $SCRF; then
     for spec in "137711:gallery/137711/scratch_full.npz" "116939:gallery/e116939_scratch.npz" "115600:gallery/e115600_scratch.npz"; do
       shot=${spec%%:*}; out=${spec#*:}
@@ -106,7 +107,7 @@ if have $NSTX && [ -n "$GPU" ]; then
     done
   fi
   # transfer at 325 discharges on 116939
-  for spec in "$FT325:gallery/e116939_${FTP}_r325.npz" "$SC325:gallery/e116939_nstx_agn_scratch_plain_r325.npz"; do
+  for spec in "$FT325:gallery/e116939_${FTP}_r325.npz" "$SC325:gallery/e116939_${SCP}_r325.npz"; do
     ck=${spec%%:*}; out=${spec#*:}
     have $ck || continue; fresh $out || continue
     L=$(onelist 116939) || continue
@@ -118,7 +119,7 @@ ZS115600=gallery/zs_$(basename "$D3D" .pt)_115600.npz
 if have $D3D && [ -n "$GPU" ] && fresh $ZS115600; then
   L=$(onelist 115600) && $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list $L --dump-preds $ZS115600 2>&1 | grep overall | sed 's/^/zero-shot 115600: /'
 fi
-for f in gallery/137711/agnostic_ft.npz gallery/e116939.npz gallery/e115600.npz gallery/e116939_nstx_agn_ft_r325.npz gallery/e116939_nstx_agn_scratch_plain_r325.npz $ZS115600; do
+for f in gallery/137711/agnostic_ft.npz gallery/e116939.npz gallery/e115600.npz gallery/e116939_nstx_agn_ft_r325.npz gallery/e116939_${SCP}_r325.npz $ZS115600; do
   [ -e $f ] && log "ok  $f" || log "MISSING: $f"
 done
 
@@ -130,8 +131,8 @@ if have $NSTX && [ -n "$GPU" ] && fresh $CAL; then
 fi
 [ -e $CAL ] && grep -E "^(ti|vtor):" $CAL | sed 's/^/    /' >> $SUMMARY
 CAL2=gallery/137711/calibration_scratch.txt
-if have cer_ckpts/nstx_agn_scratch_plain_rfull.pt && [ -n "$GPU" ] && fresh $CAL2; then
-  $RUN -m cer_transfer.analysis.calibrate --checkpoint cer_ckpts/nstx_agn_scratch_plain_rfull.pt --list splits/nstx_val.txt --limit 100 | tee $CAL2
+if have cer_ckpts/${SCP}_rfull.pt && [ -n "$GPU" ] && fresh $CAL2; then
+  $RUN -m cer_transfer.analysis.calibrate --checkpoint cer_ckpts/${SCP}_rfull.pt --list splits/nstx_val.txt --limit 100 | tee $CAL2
 fi
 VALDUMP=gallery/agnostic_scaling/${FTP}_rfull.npz
 if have $VALDUMP $CAL; then
@@ -155,7 +156,7 @@ $RUN - <<'EOF' | tee $P/scaling_table.txt | sed 's/^/    /' >> $SUMMARY
 import pandas as pd, os
 rows = []
 for k, n in (("325",325),("650",650),("1300",1300),("2600",2600),("5200",5200),("full",7307)):
-    ft = f"cer_ckpts/{os.environ.get('FTP','nstx_agn_ft')}_r{k}.metrics.csv"; sc = f"cer_ckpts/nstx_agn_scratch_plain_r{k}.metrics.csv"
+    ft = f"cer_ckpts/{os.environ.get('FTP','nstx_agn_ft')}_r{k}.metrics.csv"; sc = f"cer_ckpts/{os.environ.get('SCP','nstx_scratch64')}_r{k}.metrics.csv"
     def b(p):
         if not os.path.exists(p): return "  -  "
         d = pd.read_csv(p)
@@ -176,7 +177,7 @@ EOF
 
 # ---------------------------------------------------------------------------
 log "## 6. Figures"
-export BEAMOFF_CK=$D3D FTP   # lists and discharges: defaults in make_figs.sh (the paper's choice)
+export BEAMOFF_CK=$D3D FTP SCP   # lists and discharges: defaults in make_figs.sh (the paper's choice)
 scripts/make_figs.sh 2>&1 | grep -E "wrote|SKIP|note|using:|no beam-off" | tee $P/figs.log | sed 's/^/    /' >> $SUMMARY
 # zero-shot rotation figure: DIII-D model vs NSTX model on 115600
 if have $ZS115600 gallery/e115600.npz; then

@@ -63,7 +63,9 @@ if [ "$MODE" = scratch ]; then
       --agnostic --chord-attention --chord-attention-depth 2 --resample-w 256 \
       --feature-width 128 --hidden-dim 8 --kernel-size 3 --head-type mlp --norm group \
       $AUG \
-      --batch-size 8 --accumulation-steps 32 --subseq-len 256 --num-workers 8 --no-mmap &
+      --batch-size 32 --accumulation-steps 8 --subseq-len 64 --num-workers 8 --no-mmap &
+  # subseq 64 = the fine-tuning window; 256 (the DIII-D setting) drops every NSTX
+  # discharge shorter than 256 frames and leaves one window for the others
   wait
 elif [ "$K" = 0 ]; then
   CKPT=$SRC; MFLAG="--machine nstx"; N=0
