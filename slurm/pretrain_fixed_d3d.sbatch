@@ -7,7 +7,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=4G
 #SBATCH --gres=gpu:1
-#SBATCH --time=5-00:00:00   # causal model ~3100 s/epoch on DIII-D: ~120 epochs ~ 4.3 days (gpu-long QOS)
+#SBATCH --time=24:00:00
 #SBATCH --signal=B:USR1@300
 #SBATCH --requeue
 #SBATCH --open-mode=append
