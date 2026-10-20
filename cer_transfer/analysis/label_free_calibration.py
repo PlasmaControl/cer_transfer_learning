@@ -16,10 +16,13 @@ Training frames are selected by line brightness only (peak S/N > 30, half
 maximum inside the window); training labels are never read. Validation labels
 are used only for scoring. With ``--zero-shot-csv`` the result is written in the
 format of ``physics_correction --csv`` (column ``r2_protocol``), which draws the
-zero-shot line of the scaling figure.
+zero-shot line of the scaling figure; with ``--save-readout`` the fitted readout
+is stored, and ``predict_file_label_free`` applies model + readout to a discharge
+(used by eval_checkpoint.py and the beam-off figure via ``--readout``).
 
     pixi run --frozen python -u -m cer_transfer.analysis.label_free_calibration \
-        --checkpoint cer_ckpts/d3d_fixed_dg_rt.pt --zero-shot-csv gallery/paper/zero_shot_val.csv
+        --checkpoint cer_ckpts/d3d_fixed_dg_rt.pt --zero-shot-csv gallery/paper/zero_shot_val.csv \
+        --save-readout cer_ckpts/d3d_fixed_dg_rt_labelfree_nstx.npz
 """
 
 from __future__ import annotations
@@ -32,6 +35,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from types import SimpleNamespace
+
 from joblib import load
 from scipy.optimize import least_squares
 
@@ -71,6 +76,92 @@ def broaden(x, sigma_nm, disp):
     p = np.pad(x, ((0, 0), (0, 0), (h, h)), mode="edge")
     return sum(kk * p[..., i : i + x.shape[-1]] for i, kk in enumerate(k)).astype(
         np.float32
+    )
+
+
+def make_preprocessors(m):
+    """One causal Preprocessor (+ broadening) per pass for a loaded model."""
+    return [
+        (Preprocessor(m.machine, m.config.resample_w, w_scale=sc, w_shift=s, causal=True), b)
+        for s, sc, b in PASSES
+    ]
+
+
+@torch.no_grad()
+def run_passes(m, pres, x, disp):
+    """Model outputs of every pass for raw spectra (C, T, W).
+
+    Returns mu, sigma of shape (C, T, n_targets, n_passes).
+    """
+    mus, sgs = [], []
+    for pre, b in pres:
+        mu_n, sg_n = m.model(pre(broaden(x, b, disp)).unsqueeze(0).to(m.device), None)
+        mu, sg = denormalize_mu_sigma(mu_n, sg_n, m.stats, m.machine.targets)
+        mus.append(mu[0].cpu().numpy())
+        sgs.append(sg[0].cpu().numpy())
+    return np.stack(mus, -1), np.stack(sgs, -1)
+
+
+def fit_readout(P, C, y, n_chords, ridge=10.0):
+    """Ridge readout: all pass outputs + one offset per chord -> y. Returns its parameters."""
+    F = np.c_[P.reshape(len(P), -1), np.eye(n_chords)[C]]
+    mu, sd = F.mean(0), F.std(0) + 1e-6
+    Fn = (F - mu) / sd
+    w = np.linalg.solve(Fn.T @ Fn + ridge * np.eye(Fn.shape[1]), Fn.T @ (y - y.mean()))
+    return {"mu": mu, "sd": sd, "w": w, "ymean": float(y.mean())}
+
+
+def apply_readout(r, P, C, n_chords):
+    """Readout r applied to pass outputs P (N, n_targets, n_passes) of chords C (N,)."""
+    F = np.c_[P.reshape(len(P), -1), np.eye(n_chords)[C]]
+    return ((F - r["mu"]) / r["sd"]) @ r["w"] + r["ymean"]
+
+
+def save_readout(path, readouts, checkpoint):
+    """Store the per-target readouts (keys 'ti', 'vtor') with their passes."""
+    np.savez(
+        path,
+        passes=np.array(PASSES, dtype=float),
+        checkpoint=str(checkpoint),
+        **{f"{k}_{q}": v for k, r in readouts.items() for q, v in r.items()},
+    )
+
+
+def load_readout(path):
+    """Readouts saved by ``save_readout`` -> {'ti': params, 'vtor': params}."""
+    z = np.load(path, allow_pickle=False)
+    if [tuple(p) for p in z["passes"]] != [tuple(map(float, p)) for p in PASSES]:
+        raise ValueError(f"{path}: passes differ from this module's PASSES")
+    return {k: {q: z[f"{k}_{q}"] for q in ("mu", "sd", "w")} | {"ymean": float(z[f"{k}_ymean"])}
+            for k in ("ti", "vtor")}
+
+
+def predict_file_label_free(m, path, readouts):
+    """``inference.predict_file`` with the label-free readout applied.
+
+    pred: readout of the pass outputs; pred_sigma: the network's sigma of the best
+    single pass per target (the readout has no uncertainty of its own); y, sigma:
+    conventional fits (NaN where none).
+    """
+    d = load(data_path(path))
+    mc = m.machine
+    x = np.asarray(d["input"], np.float32)
+    if mc.input_channel_indices is not None:
+        x = x[list(mc.input_channel_indices)]
+    disp = float(np.abs(np.median(np.diff(np.asarray(d["wavelength_nm"], np.float64)))))
+    mus, sgs = run_passes(m, make_preprocessors(m), x, disp)
+    C, T = mus.shape[:2]
+    chord = np.broadcast_to(np.arange(C)[:, None], (C, T)).reshape(-1)
+    flat = mus.reshape(C * T, *mus.shape[2:])
+    pred = np.stack([apply_readout(readouts[k], flat, chord, mc.n_chords) for k in ("ti", "vtor")], -1)
+    psig = np.stack([sgs[:, :, j, ZERO_SHOT_PASS[k]] for j, k in enumerate(("ti", "vtor"))], -1)
+    scale = np.asarray(mc.target_scale, np.float32)
+    y = np.asarray(d["target"], np.float32) * scale
+    sig = np.asarray(d["target_error"], np.float32) * scale
+    if mc.chord_indices is not None:
+        y, sig = y[list(mc.chord_indices)], sig[list(mc.chord_indices)]
+    return SimpleNamespace(
+        pred=pred.reshape(C, T, 2), pred_sigma=psig, y=y, sigma=sig, targets=list(mc.targets)
     )
 
 
@@ -152,6 +243,7 @@ def main():
     ap.add_argument("--geometry-csv", default="chord_geometric_factor_nstx.csv")
     ap.add_argument("--threads", type=int, default=32)
     ap.add_argument("--zero-shot-csv", type=Path, default=None)
+    ap.add_argument("--save-readout", type=Path, default=None)
     a = ap.parse_args()
 
     rng = np.random.default_rng(0)
@@ -160,10 +252,7 @@ def main():
     mc = m.machine
     if not m.config.causal:
         raise SystemExit(f"{a.checkpoint} is not a causal model")
-    pres = [
-        (Preprocessor(mc, m.config.resample_w, w_scale=sc, w_shift=s, causal=True), b)
-        for s, sc, b in PASSES
-    ]
+    pres = make_preprocessors(m)
     cal = list(csv.DictReader(open(a.instrument_csv)))
     epochs = sorted(
         {(int(r["valid_from"].split()[1]), int(r["valid_to"].split()[1]), r["epoch"]) for r in cal}
@@ -177,15 +266,6 @@ def main():
 
     def epoch_of(shot):
         return next(e for lo, hi, e in epochs if lo <= shot <= hi)
-
-    def run_passes(x, disp):
-        ps = []
-        for pre, b in pres:
-            with torch.no_grad():
-                mu, sg = m.model(pre(broaden(x, b, disp)).unsqueeze(0), None)
-                mu, _ = denormalize_mu_sigma(mu, sg, m.stats, mc.targets)
-            ps.append(mu[0].numpy())
-        return np.stack(ps, -1)  # (C, T, 2, n_passes)
 
     def read(entry):
         d = load(data_path(entry))
@@ -202,7 +282,7 @@ def main():
         c, f = np.nonzero(bright_frames(x))
         if len(c) == 0:
             continue
-        tp.append(run_passes(x, disp)[c, f])
+        tp.append(run_passes(m, pres, x, disp)[0][c, f])
         tc.append(c)
         jobs.append(
             (
@@ -233,14 +313,13 @@ def main():
         flush=True,
     )
 
-    def readout(P, C, y):
-        F = np.c_[P.reshape(len(P), -1), np.eye(mc.n_chords)[C]]
-        mu, sd = F.mean(0), F.std(0) + 1e-6
-        Fn = (F - mu) / sd
-        w = np.linalg.solve(Fn.T @ Fn + 10 * np.eye(Fn.shape[1]), Fn.T @ (y - y.mean()))
-        return lambda P_, C_: ((np.c_[P_.reshape(len(P_), -1), np.eye(mc.n_chords)[C_]] - mu) / sd) @ w + y.mean()
-
-    ro = {k: readout(tp[good[k]], tc[good[k]], pseudo[good[k], j]) for j, k in enumerate(("ti", "vtor"))}
+    readouts = {
+        k: fit_readout(tp[good[k]], tc[good[k]], pseudo[good[k], j], mc.n_chords)
+        for j, k in enumerate(("ti", "vtor"))
+    }
+    if a.save_readout is not None:
+        save_readout(a.save_readout, readouts, a.checkpoint)
+        print(f"wrote {a.save_readout}")
 
     # validation: labels only for scoring
     vp, vy, vc = [], [], []
@@ -251,7 +330,7 @@ def main():
         if not ok.any():
             continue
         c, f = np.nonzero(ok)
-        vp.append(run_passes(x, disp)[c, f])
+        vp.append(run_passes(m, pres, x, disp)[0][c, f])
         vy.append(y[c, f])
         vc.append(c)
     vp, vy, vc = np.concatenate(vp), np.concatenate(vy), np.concatenate(vc)
@@ -262,7 +341,7 @@ def main():
     rows = []
     for j, k in enumerate(("ti", "vtor")):
         zs = r2(vp[:, j, ZERO_SHOT_PASS[k]], vy[:, j])
-        lf = r2(ro[k](vp, vc), vy[:, j])
+        lf = r2(apply_readout(readouts[k], vp, vc, mc.n_chords), vy[:, j])
         rows.append((k, zs, lf, len(vy)))
         print(f"{k}: zero-shot (best pass) R2 {zs:.4f} | label-free calibration R2 {lf:.4f} | n = {len(vy)}")
     print(f"mean: zero-shot {np.mean([r[1] for r in rows]):.4f} | label-free {np.mean([r[2] for r in rows]):.4f}")

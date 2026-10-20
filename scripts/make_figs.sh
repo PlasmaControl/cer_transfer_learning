@@ -138,6 +138,7 @@ BO_M=${BEAMOFF_MACHINE:-}; BO_K=$K
 # PAPER: the DIII-D model alone (the beam-off claim is zero-shot). BEAMOFF_CK2=<checkpoint> adds
 # a second model in the same panels (e.g. cer_ckpts/nstx_fixed_ft_rfull.pt, orange, calibrated)
 BO_CK2=${BEAMOFF_CK2:-}; [ -z "$BO_CK2" ] || [ -f "$BO_CK2" ] || BO_CK2=""
+BO_RO=${BEAMOFF_READOUT:-}   # label-free readout of the DIII-D model (make_paper.sh READOUT)
 case "$(basename "$BO_CK")" in d3d*) BO_M=${BO_M:-nstx}; BO_K="";; esac
 # PAPER: discharges 142239 (train) and 135660 (test) — the beam-off phases inside a rotating
 # plasma; the validation list has essentially none (survey with --min-rotation 50: one candidate,
@@ -147,7 +148,7 @@ BO_DEF="splits/nstx_train.txt splits/nstx_test.txt"; [ -f splits/nstx_set5.txt ]
 BO_LIST=${BEAMOFF_LIST:-$BO_DEF}
 BEAMOFF_SHOTS=${BEAMOFF_SHOTS-142239 135660}
 have $BO_CK $BO_LIST && \
-$RUN -m cer_transfer.figures.beamoff_examples --checkpoint $BO_CK --list $BO_LIST \
+$RUN -m cer_transfer.figures.beamoff_examples --checkpoint $BO_CK ${BO_RO:+--readout $BO_RO} --list $BO_LIST \
     --n 2 --chord 2 --target vtor --min-off-ms 50 --margin-before 0.20 0.06 \
     --min-rotation ${BEAMOFF_MIN_ROT:-0} --context-ms 50 --min-fits-side 3 --rotation-on-chord \
     --t-offset $OFF $BO_K ${BO_M:+--machine $BO_M} ${BEAMOFF_SHOTS:+--shots $BEAMOFF_SHOTS} --label "$NAME_ZS" \

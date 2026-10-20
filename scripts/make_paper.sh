@@ -25,6 +25,9 @@ ENV=${ENV:-.env}; [ -f "$ENV" ] && source "$ENV"   # ENV=.env.fixed with D3D=cer
 
 RUN="pixi run --frozen python -u"
 D3D=${D3D:-cer_ckpts/d3d_full_dg_e44.pt}
+# READOUT=<npz> (cer_transfer.analysis.label_free_calibration --save-readout): every evaluation of
+# the DIII-D model (validation and test dumps, 115600, beam-off figure) uses model + label-free readout
+READOUT=${READOUT:-}; RO=${READOUT:+--readout $READOUT}
 NSTX=${NSTX:-cer_ckpts/nstx_agn_ft_rfull.pt}
 # ladder prefix follows the NSTX model name (nstx_agn_ft_rfull -> nstx_agn_ft; nstx_fixed_ft_rfull -> nstx_fixed_ft)
 FTP=$(basename "$NSTX" .pt); FTP=${FTP%_rfull}
@@ -54,10 +57,12 @@ log "## 1. Zero-shot DIII-D -> NSTX (complete validation list)"
 ZSV=gallery/agnostic_scaling/${FTP}_zero_shot.npz
 if have $D3D && [ -n "$GPU" ] && fresh $ZSV; then
   mkdir -p gallery/agnostic_scaling
-  $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list splits/nstx_val.txt \
+  $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list splits/nstx_val.txt $RO \
       --dump-preds $ZSV 2>&1 | grep -E "checkpoint:|overall" | tee $P/zero_shot_val_raw.txt
 fi
-if have $ZSV gallery/instrument_width_d3d.csv gallery/instrument_width_nstx.csv; then
+if [ -n "${KEEP_ZERO_SHOT:-}" ] || [ -n "$READOUT" ]; then
+  log "zero-shot line: $P/zero_shot_val.csv left unchanged (${READOUT:+label-free readout $READOUT; }written by label_free_calibration)"
+elif have $ZSV gallery/instrument_width_d3d.csv gallery/instrument_width_nstx.csv; then
   $RUN -m cer_transfer.analysis.physics_correction --preds $ZSV \
       --src-window-nm 6.0 --src-stretch $STRETCH --tgt-window-nm 2.08 \
       --sigma-src $SIGSRC --sigma-tgt gallery/instrument_width_nstx.csv \
@@ -67,16 +72,17 @@ fi
 
 # ---------------------------------------------------------------------------
 log "## 2. Zero-shot on the NSTX TEST set (once per DIII-D model)"
-DTAG=$(basename "$D3D" .pt)
+DTAG=$(basename "$D3D" .pt)${READOUT:+_$(basename "$READOUT" .npz)}
 ZST=gallery/zs_${DTAG}_test.npz
 ZTXT=$P/zero_shot_test_${DTAG}.txt
 if [ -n "${TEST:-}" ]; then
   if [ -e $ZTXT ]; then
     log "already done for $DTAG ($ZTXT) - not repeated; delete it deliberately to redo"
   elif have $D3D && [ -n "$GPU" ]; then
-    $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list splits/nstx_test.txt \
+    $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list splits/nstx_test.txt $RO \
         --dump-preds $ZST 2>&1 | grep -E "checkpoint:|overall" | tee $P/zero_shot_test_raw_${DTAG}.txt
-    $RUN -m cer_transfer.analysis.physics_correction --preds $ZST \
+    [ -n "$READOUT" ] && cp $P/zero_shot_test_raw_${DTAG}.txt $ZTXT   # readout: no physics protocol on top
+    [ -z "$READOUT" ] && $RUN -m cer_transfer.analysis.physics_correction --preds $ZST \
         --src-window-nm 6.0 --src-stretch $STRETCH --tgt-window-nm 2.08 \
         --sigma-src $SIGSRC --sigma-tgt gallery/instrument_width_nstx.csv \
         | tee $ZTXT
@@ -115,9 +121,9 @@ if have $NSTX && [ -n "$GPU" ]; then
   done
 fi
 # zero-shot DIII-D model on 115600 (rotation figure)
-ZS115600=gallery/zs_$(basename "$D3D" .pt)_115600.npz
+ZS115600=gallery/zs_${DTAG}_115600.npz
 if have $D3D && [ -n "$GPU" ] && fresh $ZS115600; then
-  L=$(onelist 115600) && $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list $L --dump-preds $ZS115600 2>&1 | grep overall | sed 's/^/zero-shot 115600: /'
+  L=$(onelist 115600) && $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list $L $RO --dump-preds $ZS115600 2>&1 | grep overall | sed 's/^/zero-shot 115600: /'
 fi
 for f in gallery/137711/agnostic_ft.npz gallery/e116939.npz gallery/e115600.npz gallery/e116939_nstx_agn_ft_r325.npz gallery/e116939_${SCP}_r325.npz $ZS115600; do
   [ -e $f ] && log "ok  $f" || log "MISSING: $f"
@@ -177,7 +183,7 @@ EOF
 
 # ---------------------------------------------------------------------------
 log "## 6. Figures"
-export BEAMOFF_CK=$D3D FTP SCP   # lists and discharges: defaults in make_figs.sh (the paper's choice)
+export BEAMOFF_CK=$D3D BEAMOFF_READOUT=$READOUT FTP SCP   # lists and discharges: defaults in make_figs.sh (the paper's choice)
 scripts/make_figs.sh 2>&1 | grep -E "wrote|SKIP|note|using:|no beam-off" | tee $P/figs.log | sed 's/^/    /' >> $SUMMARY
 # zero-shot rotation figure: DIII-D model vs NSTX model on 115600
 if have $ZS115600 gallery/e115600.npz; then

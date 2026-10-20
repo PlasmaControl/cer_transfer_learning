@@ -68,6 +68,13 @@ def main():
         "e.g. a DIII-D model on NSTX lists)",
     )
     p.add_argument("--list", type=Path, required=True)
+    p.add_argument(
+        "--readout",
+        type=Path,
+        default=None,
+        help="label-free readout (cer_transfer.analysis.label_free_calibration "
+        "--save-readout) applied to the model's outputs",
+    )
     p.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     p.add_argument("--limit", type=int, default=0)
     p.add_argument("--n-bins", type=int, default=5)
@@ -166,13 +173,28 @@ def main():
     preds, labels, sigmas_l = [], [], []  # per-shot flattened collections
     psigs = []  # model-predicted sigmas
     amps = []  # per-(chord, frame) line amp m0
+    if args.readout is not None:
+        from cer_transfer.analysis.label_free_calibration import (
+            load_readout,
+            predict_file_label_free,
+        )
+        from cer_transfer.inference import load_model
+
+        readouts = load_readout(args.readout)
+        lf_model = load_model(args.checkpoint, device=args.device, machine=args.machine)
+        print(f"label-free readout: {args.readout}")
     for i in range(len(ds)):
         spec, tgt, err, moments = ds[i]
-        x = spec.unsqueeze(0).to(args.device)
-        mu_n, sigma_n = model(x, moments.unsqueeze(0).to(args.device))
-        mu, psig = denormalize_mu_sigma(mu_n, sigma_n, stats, machine.targets)
-        preds.append(mu[0].cpu().numpy())  # (C, T, n_t)
-        psigs.append(psig[0].cpu().numpy())
+        if args.readout is not None:
+            r = predict_file_label_free(lf_model, files[i], readouts)
+            preds.append(r.pred)  # (C, T, n_t)
+            psigs.append(r.pred_sigma)
+        else:
+            x = spec.unsqueeze(0).to(args.device)
+            mu_n, sigma_n = model(x, moments.unsqueeze(0).to(args.device))
+            mu, psig = denormalize_mu_sigma(mu_n, sigma_n, stats, machine.targets)
+            preds.append(mu[0].cpu().numpy())  # (C, T, n_t)
+            psigs.append(psig[0].cpu().numpy())
         labels.append(tgt.numpy())
         sigmas_l.append(err.numpy())
         amps.append(moments[..., 0].numpy())  # scaled log10 amplitude

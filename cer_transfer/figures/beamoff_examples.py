@@ -100,6 +100,13 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument(
+        "--readout",
+        type=Path,
+        default=None,
+        help="label-free readout applied to --checkpoint's outputs "
+        "(cer_transfer.analysis.label_free_calibration --save-readout)",
+    )
+    p.add_argument(
         "--machine", default=None, help="apply an agnostic model to this machine"
     )
     p.add_argument(
@@ -223,7 +230,16 @@ def main():
         print(f"  {e}: {te[a]:.3f}-{te[b]:.3f} s ({1000 * dur:.0f} ms)")
 
     m = load_model(args.checkpoint, machine=args.machine)
-    res = [predict_file(m, e) for _, e, _ in chosen]
+    if args.readout is not None:
+        from cer_transfer.analysis.label_free_calibration import (
+            load_readout,
+            predict_file_label_free,
+        )
+
+        ro = load_readout(args.readout)
+        res = [predict_file_label_free(m, e, ro) for _, e, _ in chosen]
+    else:
+        res = [predict_file(m, e) for _, e, _ in chosen]
     res2 = None
     if args.checkpoint2 is not None:
         m2 = load_model(args.checkpoint2, machine=args.machine2)
