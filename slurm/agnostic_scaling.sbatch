@@ -29,6 +29,8 @@
 #   error bars: SEED=1 (and 2, ...) with --array=1-6 trains every rung on draw n of the
 #     subset with training seed 42+n (K=full: training seed only); make_figs collects
 #     *_r<K>_s*.metrics.csv into mean +- std
+#   initialization-only transfer (same optimizer as the baseline, lr 1e-3 everywhere):
+#     sbatch --array=1-6 --export=ALL,ENV=.env.fixed,MODE=finetune,SRC=cer_ckpts/d3d_fixed_plain_best.pt,PREFIX=nstx_fixed_init,BACKBONE_LR=1e-3,LATE_LR=1e-3,HEAD_LR=1e-3 slurm/agnostic_scaling.sbatch
 #   track B: sbatch --array=0-6 --export=ALL,ENV=.env.fixed,MODE=finetune,SRC=cer_ckpts/d3d_fixed_plain_best.pt,PREFIX=nstx_fixed_ft slurm/agnostic_scaling.sbatch
 module purge
 export PATH="$HOME/.pixi/bin:$PATH"
@@ -88,7 +90,7 @@ else
       --source-checkpoint "$SRC" --machine nstx --checkpoint "$CKPT" \
       --train-list $LIST --val-list splits/nstx_val.txt \
       --subseq-len 64 --batch-size 32 --accumulation-steps 8 --num-workers 8 \
-      --probe-epochs 0 --backbone-lr 1e-5 --late-backbone-lr 1e-4 --head-lr 1e-4 \
+      --probe-epochs 0 --backbone-lr ${BACKBONE_LR:-1e-5} --late-backbone-lr ${LATE_LR:-1e-4} --head-lr ${HEAD_LR:-1e-4} \
       --epochs 300 --no-mmap &
   wait
 fi
