@@ -22,13 +22,23 @@ import argparse
 import numpy as np
 
 
-def consistent_mask(y):
-    """y: (C, T) labels of one target; returns (C, T) bool, True = kept."""
+UNLABELED, CONSISTENT, RUN_EDGE, SPIKE = -1, 0, 1, 2
+
+
+def label_classes(y):
+    """Label class of every point by the label-only criteria (see module docstring).
+
+    y: (C, T) labels of one target. Returns (C, T) int8: -1 unlabeled,
+    0 consistent, 1 run edge (first/last label of a run; every label of a chord
+    with fewer than 3 labels), 2 spike. Edges and spikes are disjoint by
+    construction (a spike candidate has unbroken equal gaps on both sides).
+    """
     C, T = y.shape
-    keep = np.zeros((C, T), bool)
+    cls = np.full((C, T), UNLABELED, np.int8)
     for c in range(C):
         idx = np.where(np.isfinite(y[c]))[0]
         if idx.size < 3:
+            cls[c, idx] = RUN_EDGE
             continue
         gaps = np.diff(idx)
         med = np.median(gaps)
@@ -49,8 +59,15 @@ def consistent_mask(y):
             mad = 1.4826 * np.median(np.abs(ee - np.median(ee)))
             if mad > 0:
                 spike[eq] = np.abs(e[eq]) > 8 * mad
-        keep[c, idx[~edge & ~spike]] = True
-    return keep
+        cls[c, idx] = CONSISTENT
+        cls[c, idx[spike]] = SPIKE
+        cls[c, idx[edge]] = RUN_EDGE
+    return cls
+
+
+def consistent_mask(y):
+    """y: (C, T) labels of one target; returns (C, T) bool, True = kept."""
+    return label_classes(y) == CONSISTENT
 
 
 def main():

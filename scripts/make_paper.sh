@@ -20,20 +20,21 @@
 # Needs a GPU for the dumps/evaluations (an interactive GPU shell, or sbatch this script).
 set -uo pipefail
 cd "$(dirname "$0")/.."
-ENV=${ENV:-.env}; [ -f "$ENV" ] && source "$ENV"   # ENV=.env.fixed with D3D=cer_ckpts/d3d_fixed_*.pt (track B)
+ENV=${ENV:-.env.fixed}; [ -f "$ENV" ] && source "$ENV"   # defaults: the paper's causal models (track B)
 : "${CER_DATA_ROOT:?CER_DATA_ROOT not set (source .env)}"
 
 RUN="pixi run --frozen python -u"
-D3D=${D3D:-cer_ckpts/d3d_full_dg_e44.pt}
+D3D=${D3D:-cer_ckpts/d3d_fixed_dg_rt.pt}   # causal DIII-D model
 # READOUT=<npz> (cer_transfer.analysis.label_free_calibration --save-readout): every evaluation of
 # the DIII-D model (validation and test dumps, 115600, beam-off figure) uses model + label-free readout
-READOUT=${READOUT:-}; RO=${READOUT:+--readout $READOUT}
-NSTX=${NSTX:-cer_ckpts/nstx_agn_ft_rfull.pt}
+READOUT=${READOUT-cer_ckpts/d3d_fixed_dg_rt_labelfree_nstx.npz}; RO=${READOUT:+--readout $READOUT}
+NSTX=${NSTX:-cer_ckpts/nstx_rt_init_rfull.pt}   # causal, fine-tuned from D3D
 # ladder prefix follows the NSTX model name (nstx_agn_ft_rfull -> nstx_agn_ft; nstx_fixed_ft_rfull -> nstx_fixed_ft)
-FTP=$(basename "$NSTX" .pt); FTP=${FTP%_rfull}
+FTP_DEF=$(basename "$NSTX" .pt); FTP=${FTP:-${FTP_DEF%_rfull}}   # FTP=... overrides (stand-in NSTX models)
+NAME_FT_FULL=${NAME_FT_FULL:-"DIII-D+NSTX (7307 discharges) model"}; export NAME_FT_FULL
 SCP=${SCP:-nstx_scratch64}   # from-scratch baseline prefix (subseq 64; nstx_agn_scratch_plain = the old subseq-256 runs)
-FT325=cer_ckpts/${FTP}_r325.pt
-SC325=cer_ckpts/${SCP}_r325.pt
+FT325=cer_ckpts/${FTP}_r325.pt; [ -e $FT325 ] || FT325=cer_ckpts/${FTP}_r325_s1.pt   # seeded-only sets: draw 1
+SC325=cer_ckpts/${SCP}_r325.pt; case $FT325 in *_s1.pt) SC325=cer_ckpts/${SCP}_r325_s1.pt;; esac   # same 325 discharges
 # DIII-D convention of the zero-shot protocol: 1.4 for the old data (track A), 2.842 for the rebuilt files (track B)
 case "$(basename "$D3D")" in d3d_fixed*) STRETCH=2.842; SIGSRC=gallery/instrument_width_d3d_fixed.csv;; *) STRETCH=1.4; SIGSRC=gallery/instrument_width_d3d.csv;; esac
 case "$D3D$CER_DATA_ROOT" in *fixed*fixed*|*full_dg*data_root) ;; *) echo "D3D=$D3D does not match CER_DATA_ROOT=$CER_DATA_ROOT (track mix-up)"; exit 1;; esac
@@ -94,6 +95,27 @@ fi
 [ -e $ZTXT ] && grep -E "^(ti|vtor):" $ZTXT | sed 's/^/    /' >> $SUMMARY
 
 # ---------------------------------------------------------------------------
+log "## 2b. Zero-shot DIII-D -> NSTX-U (TEST set, the NSTX label-free readout carried over unchanged)"
+# no NSTX-U information is used: same model and readout as for NSTX; CPU suffices (70 discharges)
+ZSU=gallery/nstxu/zs_test_$(basename "$D3D" .pt)${READOUT:+_$(basename "$READOUT" .npz)}.npz
+if have $D3D && fresh $ZSU; then
+  mkdir -p gallery/nstxu
+  $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list splits/nstxu_test.txt $RO \
+      --dump-preds $ZSU 2>&1 | grep -E "checkpoint:|overall" | tee $P/zero_shot_nstxu_test_raw.txt
+fi
+if have $ZSU; then
+  $RUN -m cer_transfer.analysis.global_metrics --preds $ZSU | tee $P/zero_shot_nstxu_test.txt
+  grep -E "^(ti|vtor): all labels" $P/zero_shot_nstxu_test.txt | sed 's/^/    NSTX-U zero-shot /' >> $SUMMARY
+fi
+# the NSTX model applied to NSTX-U without NSTX-U data (nstxu_transfer figure)
+ZSUN=gallery/nstxu/zs_test_$(basename "$NSTX" .pt).npz
+if have $NSTX && fresh $ZSUN; then
+  $RUN eval_checkpoint.py --checkpoint $NSTX --list splits/nstxu_test.txt --dump-preds $ZSUN 2>&1 \
+      | grep -E "checkpoint:|overall"
+fi
+have $ZSUN && $RUN -m cer_transfer.analysis.global_metrics --preds $ZSUN > $P/nstxu_test_$(basename "$NSTX" .pt).txt
+# trained on the NSTX-U training discharges: slurm/finetune_nstxu.sbatch (SEED=1..5)
+
 log "## 3. Prediction dumps of the NSTX model (one discharge each)"
 if have $NSTX && [ -n "$GPU" ]; then
   for spec in "137711:gallery/137711/agnostic_ft.npz" "116939:gallery/e116939.npz" "115600:gallery/e115600.npz"; do
@@ -120,6 +142,11 @@ if have $NSTX && [ -n "$GPU" ]; then
     $RUN eval_checkpoint.py --checkpoint $ck --list $L --dump-preds $out 2>&1 | grep -E "overall" | sed "s|^|$(basename $ck): |"
   done
 fi
+# zero-shot DIII-D model on 137711 (reconstruction figure with both models)
+ZS137711=gallery/137711/zero_shot_readout.npz
+if have $D3D && [ -n "$GPU" ] && fresh $ZS137711; then
+  L=$(onelist 137711) && $RUN eval_checkpoint.py --checkpoint $D3D --machine nstx --list $L $RO --dump-preds $ZS137711 2>&1 | grep overall | sed 's/^/zero-shot 137711: /'
+fi
 # zero-shot DIII-D model on 115600 (rotation figure)
 ZS115600=gallery/zs_${DTAG}_115600.npz
 if have $D3D && [ -n "$GPU" ] && fresh $ZS115600; then
@@ -140,21 +167,37 @@ CAL2=gallery/137711/calibration_scratch.txt
 if have cer_ckpts/${SCP}_rfull.pt && [ -n "$GPU" ] && fresh $CAL2; then
   $RUN -m cer_transfer.analysis.calibrate --checkpoint cer_ckpts/${SCP}_rfull.pt --list splits/nstx_val.txt --limit 100 | tee $CAL2
 fi
-VALDUMP=gallery/agnostic_scaling/${FTP}_rfull.npz
+VALDUMP=${FT_VAL:-gallery/agnostic_scaling/${FTP}_rfull.npz}   # validation dump of the NSTX model
 if have $VALDUMP $CAL; then
   KTI=$(awk '/^ti:/ {for (i=1;i<=NF;i++) if ($i=="k") print $(i+2)}' $CAL | tr -d ',')
   KVT=$(awk '/^vtor:/ {for (i=1;i<=NF;i++) if ($i=="k") print $(i+2)}' $CAL | tr -d ',')
   $RUN -m cer_transfer.analysis.coverage --preds $VALDUMP --k ${KTI:-1} ${KVT:-1} | tee $P/coverage.txt
   grep -A4 "LaTeX rows" $P/coverage.txt | sed 's/^/    /' >> $SUMMARY
 fi
-if have $VALDUMP; then
-  $RUN -m cer_transfer.analysis.global_metrics --preds $VALDUMP | tee $P/global_metrics.txt
-  grep -A6 "LaTeX rows" $P/global_metrics.txt | sed 's/^/    /' >> $SUMMARY
-fi
 if fresh $P/ceilings.txt && [ -n "$GPU" ]; then   # CPU-only but slow: run with the GPU session
   $RUN -m cer_transfer.analysis.ceiling_check --machine nstx --list splits/nstx_val.txt --honest | tee $P/ceilings.txt
 fi
 [ -e $P/ceilings.txt ] && log "ceilings: $P/ceilings.txt"
+# test-set dump of the NSTX (fine-tuned) model: reliability diagram
+FTTEST=gallery/ft_test_$(basename "$NSTX" .pt).npz
+if have $NSTX && [ -n "$GPU" ] && fresh $FTTEST; then
+  $RUN eval_checkpoint.py --checkpoint $NSTX --list splits/nstx_test.txt --dump-preds $FTTEST 2>&1 | grep -E "overall" | sed 's/^/test: /'
+fi
+# tab:global_metrics: the NSTX model on the TEST set (all and consistent labels, best possible R2)
+if have $FTTEST; then   # frames per test file (error_decomposition cuts its trace out of the dump)
+  $RUN -m cer_transfer.analysis.slice_dump --dump $FTTEST --list splits/nstx_test.txt \
+      --lengths gallery/test_file_lengths.npz
+fi
+if have $FTTEST; then
+  $RUN -m cer_transfer.analysis.global_metrics --preds $FTTEST --chords figs/chords_Rtan_137711.csv | tee $P/global_metrics.txt
+  grep -A6 "LaTeX rows" $P/global_metrics.txt | sed 's/^/    /' >> $SUMMARY
+fi
+# beam-off checks (context ablation, rejoin error) for the DIII-D and the NSTX model: beam-off figure c, d
+BOCHK=gallery/paper/beamoff_checks.npz
+if have $D3D $NSTX && [ -n "$GPU" ] && fresh $BOCHK; then
+  $RUN -m cer_transfer.analysis.beamoff_checks --model "DIII-D=$D3D${READOUT:+:$READOUT}" --model "DIII-D+NSTX=$NSTX" \
+      --list splits/nstx_val.txt splits/nstx_test.txt --csv $P/beamoff_checks.csv --dump $BOCHK 2>&1 | grep -vE "WARN" | tee $P/beamoff_checks.txt
+fi
 
 # ---------------------------------------------------------------------------
 log "## 5. Scaling table (best val_score per rung)"
@@ -183,15 +226,15 @@ EOF
 
 # ---------------------------------------------------------------------------
 log "## 6. Figures"
-export BEAMOFF_CK=$D3D BEAMOFF_READOUT=$READOUT FTP SCP   # lists and discharges: defaults in make_figs.sh (the paper's choice)
+export BEAMOFF_CK=$D3D BEAMOFF_READOUT=$READOUT BEAMOFF_CK2=${BEAMOFF_CK2-$NSTX} BEAMOFF_CHECKS=$BOCHK ZS_DUMP=$ZSV ZS_TEST=$ZST FT_VAL=$VALDUMP FT_TEST=$FTTEST FTP SCP   # beam-off figure: DIII-D and fine-tuned model   # lists and discharges: defaults in make_figs.sh (the paper's choice)
 scripts/make_figs.sh 2>&1 | grep -E "wrote|SKIP|note|using:|no beam-off" | tee $P/figs.log | sed 's/^/    /' >> $SUMMARY
 # zero-shot rotation figure: DIII-D model vs NSTX model on 115600
 if have $ZS115600 gallery/e115600.npz; then
   R=gallery; [ -f figs/chords_Rtan_115600.csv ] && R=figs
   L=$(grep -h 115600 splits/nstx_val.txt | head -1)
   $RUN -m cer_transfer.figures.recon_composite --preds $ZS115600 --label1 "DIII-D model" \
-      --preds2 gallery/e115600.npz --label2 "DIII-D+NSTX (7307 shots) model" --shot "$CER_DATA_ROOT/$L" \
-      --t-offset -0.235 --unl-gap 2 ${R:+--profile-x $R/chords_Rtan_115600.csv} --profile-xlabel '$R_\mathrm{tan}$ (m)' \
+      --preds2 gallery/e115600.npz --label2 "$NAME_FT_FULL" ${KTI:+--k2 $KTI $KVT} --shot "$CER_DATA_ROOT/$L" \
+      --t-offset -0.235 --unl-gap 2 --profile-time 0.335 ${R:+--profile-x $R/chords_Rtan_115600.csv} --profile-xlabel '$R_\mathrm{tan}$ (m)' \
       --out figs --out-name zero_shot_vtor_115600 2>&1 | grep -E "wrote|rror" | sed 's/^/    /' | tee -a $SUMMARY
 fi
 # (scaling figure incl. the zero-shot line and the baseline learning curves: drawn by make_figs.sh above)

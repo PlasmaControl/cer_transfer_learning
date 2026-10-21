@@ -33,7 +33,7 @@ XL='$R_\mathrm{tan}$ (m)'
 #   DIII-D model                   = trained on DIII-D, applied to NSTX without NSTX training (zero-shot)
 #   NSTX model / NSTX (N shots) model = trained from scratch on NSTX (N discharges)
 #   DIII-D+NSTX (N shots) model    = DIII-D model fine-tuned on N NSTX discharges
-NAME_ZS="DIII-D model"; NAME_SCR="NSTX model"; NAME_FT_FULL="DIII-D+NSTX (7307 shots) model"; NAME_FT_325="DIII-D+NSTX (325 shots) model"; NAME_SCR_325="NSTX (325 shots) model"
+NAME_ZS="DIII-D model"; NAME_SCR="NSTX model"; NAME_FT_FULL=${NAME_FT_FULL:-"DIII-D+NSTX (7307 discharges) model"}; NAME_FT_325="DIII-D+NSTX (325 discharges) model"; NAME_SCR_325="NSTX (325 discharges) model"
 H=gallery/137711
 if [ -n "${CHORD_X:-}" ]; then R=$CHORD_X
 elif [ -f figs/chords_Rtan_137711.csv ]; then R=figs; else R=gallery; fi
@@ -62,6 +62,13 @@ $RUN -m cer_transfer.figures.recon_composite --preds $H/agnostic_ft.npz \
     --shot "${CER_DATA_ROOT:-.}/$L137711" --label1 "$NAME_FT_FULL" --t-offset $OFF --unl-gap 2 $K \
     --profile-x $R/chords_Rtan_137711.csv --profile-xlabel "$XL" \
     --out figs --out-name recon_legacy_137711
+# the same with the DIII-D model (zero-shot + label-free readout): core and edge chord (R_tan 0.99, 1.43 m)
+have $H/agnostic_ft.npz $H/zero_shot_readout.npz $R/chords_Rtan_137711.csv && \
+$RUN -m cer_transfer.figures.recon_composite --preds $H/agnostic_ft.npz --label1 "$NAME_FT_FULL" $K \
+    --preds2 $H/zero_shot_readout.npz --label2 "$NAME_ZS" \
+    --shot "${CER_DATA_ROOT:-.}/$L137711" --t-offset $OFF --unl-gap 2 --trace-chords 3,32 \
+    --profile-x $R/chords_Rtan_137711.csv --profile-xlabel "$XL" \
+    --out figs --out-name recon_137711_zeroshot_finetuned
 
 # --- Fig 3: background-array vs foreground-array model (unchanged) ---------
 have $H/passive.npz $H/active.npz && [ -n "$B137711" ] && \
@@ -93,6 +100,16 @@ event() {  # $1 preds  $2 t0  $3 t1  $4 shot  $5 out-name  $6 trace R (m)  [$7 z
 T116939="--times 0.376 0.406 0.426"; T115600="--times 0.315 0.365 0.395"
 event gallery/e116939.npz 0.370 0.445 116939 event_ntv_116939 1.10 "" 0.5 "$K" "$NAME_FT_FULL" "$T116939"
 event gallery/e115600.npz 0.315 0.400 115600 event_tm_115600 1.00 "" 0.7 "$K" "$NAME_FT_FULL" "$T115600"   # edge chords with few fits drop out
+# both events in one figure: 116939 (n=1 collapse; v_tor), 115600 (tearing-mode braking; v_tor and T_i rows)
+SF1=$(shotany 116939); SF2=$(shotany 115600)
+EFD="${EFIT_DIR:-${CER_DATA_ROOT:-.}/chers_set5}"
+have gallery/e116939.npz gallery/e115600.npz $R/chords_Rtan_116939.csv $R/chords_Rtan_115600.csv && \
+$RUN -m cer_transfer.figures.events_merged --preds gallery/e116939.npz gallery/e115600.npz \
+    --t0 0.370 0.315 --t1 0.445 0.400 --trace-x 1.10 1.00 \
+    --times "0.376 0.406 0.426" "0.315 0.365 0.395" --min-fit-frac 0.5 0.7 \
+    --shot $SF1 $SF2 --efit $EFD/efit_116939.joblib $EFD/efit_115600.joblib \
+    --profile-x $R/chords_Rtan_116939.csv $R/chords_Rtan_115600.csv --profile-xlabel "$XL" --targets vtor "vtor ti" \
+    --t-offset $OFF $K --label1 "$NAME_FT_FULL" --out figs --out-name events_merged
 
 # --- Alternative versions of Fig. 2 and the two events with the NSTX-only model
 # (trained from scratch on all 7307 discharges): dumps gallery/137711/scratch_full.npz,
@@ -105,22 +122,21 @@ if [ -f $H/calibration_scratch.txt ]; then
 fi
 have $H/scratch_full.npz $R/chords_Rtan_137711.csv && \
 $RUN -m cer_transfer.figures.recon_composite --preds $H/scratch_full.npz \
-    --shot "${CER_DATA_ROOT:-.}/$L137711" --label1 "NSTX (7307 shots) model" --t-offset $OFF --unl-gap 2 $KS \
+    --shot "${CER_DATA_ROOT:-.}/$L137711" --label1 "NSTX (7307 discharges) model" --t-offset $OFF --unl-gap 2 $KS \
     --profile-x $R/chords_Rtan_137711.csv --profile-xlabel "$XL" \
     --out figs --out-name recon_legacy_137711_scratch
-event gallery/e116939_scratch.npz 0.370 0.445 116939 event_ntv_116939_scratch 1.10 "" 0.5 "$KS" "NSTX (7307 shots) model" "$T116939"
-event gallery/e115600_scratch.npz 0.315 0.400 115600 event_tm_115600_scratch 1.00 "" 0.7 "$KS" "NSTX (7307 shots) model" "$T115600"
+event gallery/e116939_scratch.npz 0.370 0.445 116939 event_ntv_116939_scratch 1.10 "" 0.5 "$KS" "NSTX (7307 discharges) model" "$T116939"
+event gallery/e115600_scratch.npz 0.315 0.400 115600 event_tm_115600_scratch 1.00 "" 0.7 "$KS" "NSTX (7307 discharges) model" "$T115600"
 
 # --- Transfer at 325 discharges: fine-tuned vs from scratch in ONE figure ------
 # (manuscript include: event_transfer_r325_116939)
-FTP=${FTP:-nstx_agn_ft}   # ladder prefix (track B: nstx_fixed_ft)
+FTP=${FTP:-nstx_rt_init}   # ladder prefix: causal, fine-tuned from d3d_fixed_dg_rt
 SCP=${SCP:-nstx_scratch64}   # from-scratch baseline prefix
 have gallery/e116939_${FTP}_r325.npz gallery/e116939_${SCP}_r325.npz $R/chords_Rtan_116939.csv && \
 $RUN -m cer_transfer.figures.event_panels --preds gallery/e116939_${FTP}_r325.npz \
-    --preds2 gallery/e116939_${SCP}_r325.npz \
-    --label1 "$NAME_FT_325" --label2 "$NAME_SCR_325" --no-reference \
-    --t0 0.370 --t1 0.445 --t-offset $OFF --target ${EVENT_TARGET:-both} $T116939 --trace-x 1.10 --ylim -10 270 $(SF=$(shotany 116939); echo ${SF:+--shot $SF}) \
-    $(EF="${EFIT_DIR:-${CER_DATA_ROOT:-.}/chers_set5}/efit_116939.joblib"; [ -f "$EF" ] && echo "--efit $EF") \
+    --preds2 gallery/e116939_${SCP}_r325.npz --label1 "$NAME_FT_325" --label2 "$NAME_SCR_325" \
+    --trace-only --mae-range discharge --target vtor --trace-x 1.10 \
+    --t0 0.370 --t1 0.445 --t-offset $OFF --ylim -10 270 $(SF=$(shotany 116939); echo ${SF:+--shot $SF}) \
     --profile-x $R/chords_Rtan_116939.csv --profile-xlabel "$XL" --out figs --out-name event_transfer_r325_116939
 
 # --- Beam-off examples: model on the regular spectra while the beam is off --
@@ -128,17 +144,17 @@ $RUN -m cer_transfer.figures.event_panels --preds gallery/e116939_${FTP}_r325.np
 # runs directly, no stored dumps; BEAMOFF_CK selects the checkpoint)
 # ONE choice of the DIII-D model for this figure, the same in make_figs.sh and make_paper.sh:
 # BEAMOFF_CK if set, else D3D (the build's DIII-D model), else the paper's model. Printed below.
-BO_CK=${BEAMOFF_CK:-${D3D:-cer_ckpts/d3d_fixed_plain_best.pt}}
+BO_CK=${BEAMOFF_CK:-${D3D:-cer_ckpts/d3d_fixed_dg_rt.pt}}
 echo "beam-off figure: DIII-D model = $BO_CK"
 # a DIII-D checkpoint must be applied with the NSTX preprocessing (the files
 # are NSTX): without --machine, load_model uses the checkpoint's machine and
 # the DIII-D flip/stretch would invert the rotation sign; the calibration
 # factors K belong to nstx_agn_ft_rfull and are not applied to other models
 BO_M=${BEAMOFF_MACHINE:-}; BO_K=$K
-# PAPER: the DIII-D model alone (the beam-off claim is zero-shot). BEAMOFF_CK2=<checkpoint> adds
-# a second model in the same panels (e.g. cer_ckpts/nstx_fixed_ft_rfull.pt, orange, calibrated)
-BO_CK2=${BEAMOFF_CK2:-}; [ -z "$BO_CK2" ] || [ -f "$BO_CK2" ] || BO_CK2=""
-BO_RO=${BEAMOFF_READOUT:-}   # label-free readout of the DIII-D model (make_paper.sh READOUT)
+# PAPER: the DIII-D model (zero-shot, label-free readout) and the fine-tuned model in the same
+# panels; BEAMOFF_CK2="" drops the second one
+BO_CK2=${BEAMOFF_CK2-cer_ckpts/${FTP}_rfull.pt}; [ -z "$BO_CK2" ] || [ -f "$BO_CK2" ] || BO_CK2=""
+BO_RO=${BEAMOFF_READOUT-cer_ckpts/d3d_fixed_dg_rt_labelfree_nstx.npz}   # label-free readout of the DIII-D model (make_paper.sh READOUT)
 case "$(basename "$BO_CK")" in d3d*) BO_M=${BO_M:-nstx}; BO_K="";; esac
 # PAPER: discharges 142239 (train) and 135660 (test) — the beam-off phases inside a rotating
 # plasma; the validation list has essentially none (survey with --min-rotation 50: one candidate,
@@ -153,15 +169,21 @@ $RUN -m cer_transfer.figures.beamoff_examples --checkpoint $BO_CK ${BO_RO:+--rea
     --min-rotation ${BEAMOFF_MIN_ROT:-0} --context-ms 50 --min-fits-side 3 --rotation-on-chord \
     --t-offset $OFF $BO_K ${BO_M:+--machine $BO_M} ${BEAMOFF_SHOTS:+--shots $BEAMOFF_SHOTS} --label "$NAME_ZS" \
     ${BO_CK2:+--checkpoint2 $BO_CK2 --label2 "$NAME_FT_FULL" ${K:+--k2 ${K#--k }}} \
-    --out figs --out-name beamoff_examples
+    $([ -f "${BEAMOFF_CHECKS:-gallery/paper/beamoff_checks.npz}" ] && echo "--checks ${BEAMOFF_CHECKS:-gallery/paper/beamoff_checks.npz}") \
+    --out figs --out-name beamoff_with_ablation
 
 # --- Baseline learning curves: trained from scratch on each machine ---------
 # DIII-D: the full-data DG run (frozen at its best epoch 44); NSTX: plain recipe, all discharges
 # DIII-D curve = the run of the paper's DIII-D model (track B: d3d_fixed_plain; track A: d3d_full_dg)
 D3D_METRICS=${D3D_METRICS:-cer_ckpts/d3d_fixed_plain.metrics.csv}; [ -f "$D3D_METRICS" ] || D3D_METRICS=cer_ckpts/d3d_full_dg.metrics.csv
+FTC=()   # fine-tuning curves (dashed) on the NSTX panel: 325 (draw 1) and all discharges
+for f in "$NAME_FT_325:cer_ckpts/${FTP}_r325_s1.metrics.csv" "DIII-D+NSTX (7307 discharges) model:cer_ckpts/${FTP}_rfull.metrics.csv"; do
+  [ -f "${f#*:}" ] && FTC+=("$f")
+done
 have $D3D_METRICS cer_ckpts/${SCP}_rfull.metrics.csv && \
 $RUN -m cer_transfer.figures.plots curves --csv $D3D_METRICS \
-    cer_ckpts/${SCP}_rfull.metrics.csv --labels "DIII-D (13143 shots) model" "NSTX (7307 shots) model" \
+    cer_ckpts/${SCP}_rfull.metrics.csv --labels "DIII-D (13143 discharges) model" "NSTX (7307 discharges) model" \
+    ${FTC[@]:+--ft-csv "${FTC[@]}"} \
     --mark-best --drop-outliers --out figs --out-name learning_curves_val_score_baseline
 
 # --- Scaling figure: fine-tuned from DIII-D vs from scratch, zero-shot line ---
@@ -170,8 +192,8 @@ $RUN -m cer_transfer.figures.plots curves --csv $D3D_METRICS \
 FT=(); SC=()
 for k in 325 650 1300 2600 5200 full; do
   n=$k; [ $k = full ] && n=7307
-  [ -f cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv ]      && FT+=("$n:cer_ckpts/${FTP:-nstx_agn_ft}_r$k.metrics.csv")
-  for f in cer_ckpts/${FTP:-nstx_agn_ft}_r${k}_s*.metrics.csv; do [ -f "$f" ] && FT+=("$n:$f"); done   # repeated draws -> error bars
+  [ -f cer_ckpts/${FTP}_r$k.metrics.csv ]      && FT+=("$n:cer_ckpts/${FTP}_r$k.metrics.csv")
+  for f in cer_ckpts/${FTP}_r${k}_s*.metrics.csv; do [ -f "$f" ] && FT+=("$n:$f"); done   # repeated draws -> error bars
   [ -f cer_ckpts/${SCP}_r$k.metrics.csv ] && SC+=("$n:cer_ckpts/${SCP}_r$k.metrics.csv")
   for f in cer_ckpts/${SCP}_r${k}_s*.metrics.csv; do [ -f "$f" ] && SC+=("$n:$f"); done
 done
@@ -182,10 +204,46 @@ if [ ${#FT[@]} -gt 0 ]; then
       --runs "${FT[@]}" ${SC:+--scratch "${SC[@]}"} \
       $([ -f $Z ] && echo "--zero-shot-csv $Z --zero-shot-column r2_protocol")
   [ -f $Z ] || echo "note: $Z missing - scaling figure without the zero-shot line (run scripts/make_paper.sh)"
+  # label efficiency: (a, b) R^2 of T_i and v_tor vs discharges, (c) 116939 core chord at 325
+  have gallery/e116939_${FTP}_r325.npz gallery/e116939_${SCP}_r325.npz $R/chords_Rtan_116939.csv && [ -n "$SC" ] && \
+  $RUN -m cer_transfer.figures.plots scaling_targets --out figs --out-name scaling_and_transfer_event \
+      --runs-label "DIII-D+NSTX model" --scratch-label "$NAME_SCR" --zero-shot-label "$NAME_ZS" \
+      --runs "${FT[@]}" --scratch "${SC[@]}" \
+      $([ -f $Z ] && echo "--zero-shot-csv $Z --zero-shot-column r2_protocol") \
+      --trace-preds gallery/e116939_${FTP}_r325.npz --trace-preds2 gallery/e116939_${SCP}_r325.npz \
+      --trace-label "$NAME_FT_325" --trace-label2 "$NAME_SCR_325" $(SF=$(shotany 116939); echo ${SF:+--trace-shot $SF}) \
+      --trace-chords $R/chords_Rtan_116939.csv --trace-x 1.10 --trace-t-offset $OFF
 else
   echo "SKIP: no metrics of the scaling runs"
 fi
 
-ls -la figs/recon_legacy_137711.pdf figs/event_ntv_116939.pdf figs/event_tm_115600.pdf \
-    figs/event_transfer_r325_116939.pdf figs/beamoff_examples.pdf figs/scaling_val_score.pdf \
+# --- Zero-shot transfer, label classes, relative error, reliability (DIII-D model + readout,
+#     NSTX model; dumps from make_paper.sh: ZS_DUMP, FT_VAL, FT_TEST) -------------------------
+ZS_DUMP=${ZS_DUMP:-gallery/agnostic_scaling/${FTP}_zero_shot.npz}
+FT_VAL=${FT_VAL:-gallery/agnostic_scaling/${FTP}_rfull.npz}
+FT_TEST=${FT_TEST:-gallery/ft_test_${FTP}_rfull.npz}
+CH=$R/chords_Rtan_137711.csv
+# zero-shot transfer figure: NSTX TEST set (zero-shot test dump of make_paper.sh section 2, fine-tuned test dump)
+ZS_TEST=${ZS_TEST:-gallery/zs_$(basename "$BO_CK" .pt)${BO_RO:+_$(basename "$BO_RO" .npz)}_test.npz}
+have $ZS_TEST $FT_TEST $CH && $RUN -m cer_transfer.figures.plots zeroshot --zs $ZS_TEST --ft $FT_TEST --chords $CH --out figs --out-name zero_shot_decomposition
+# where the error lives (NSTX TEST set): (a) predicted vs fitted v_tor, flagged labels in orange;
+# (b) v_tor trace of test discharge 124794 (cut out of the test dump; pooled label classes);
+# (c, d) median |error| and sigma_fit vs R_tan. SM: the T_i version of (a).
+have $FT_TEST gallery/test_file_lengths.npz $CH $R/chords_Rtan_124794.csv && \
+$RUN -m cer_transfer.figures.plots errclass --preds $FT_TEST --file-lengths gallery/test_file_lengths.npz \
+    --trace-shot $(shotany 124794) --trace-chords $R/chords_Rtan_124794.csv \
+    --chord 10 --t0 0.0955 --window 0.23 --chords $CH ${KVT:+--k ${KVT%,}} --t-offset $OFF \
+    --out figs --out-name error_decomposition
+have $FT_TEST && $RUN -m cer_transfer.figures.plots flaghist --preds $FT_TEST --target ti --out figs
+have $FT_VAL $CH && $RUN -m cer_transfer.figures.plots relerr --preds $FT_VAL --chords $CH --out figs
+have $FT_TEST $CH && $RUN -m cer_transfer.figures.plots reliability --preds $FT_TEST $K --chords $CH --out figs --out-name calibration_reliability
+# transfer to NSTX-U: zero-shot (make_paper.sh 2b) and trained on 325 NSTX-U discharges, 5 seeds
+# each (slurm/finetune_nstxu.sbatch SEED=1..5)
+have gallery/paper/zero_shot_nstxu_test.txt gallery/paper/nstxu_test_${FTP}_rfull.txt \
+    gallery/nstxu/nstxu_ft_d3d_r325_s1_test.metrics.txt gallery/nstxu/nstxu_ft_nstx_r325_s1_test.metrics.txt \
+    gallery/nstxu/nstxu_scratch64_r325_s1_test.metrics.txt && \
+$RUN -m cer_transfer.figures.plots nstxu --zs-nstx gallery/paper/nstxu_test_${FTP}_rfull.txt --out figs
+
+ls -la figs/recon_137711_zeroshot_finetuned.pdf figs/scaling_and_transfer_event.pdf \
+    figs/events_merged.pdf figs/error_decomposition.pdf figs/beamoff_with_ablation.pdf \
     figs/learning_curves_val_score_baseline.pdf 2>/dev/null

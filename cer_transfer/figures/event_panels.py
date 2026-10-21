@@ -26,6 +26,7 @@ from joblib import load
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
+from cer_transfer.figures import style  # noqa: E402
 from cer_transfer.figures.common import (  # noqa: E402
     FRAME_HZ,
     chord_coordinate,
@@ -38,6 +39,143 @@ from cer_transfer.figures.timeaxis import file_times  # noqa: E402
 sns.set_style("whitegrid")
 
 FS = FRAME_HZ  # overridden by --fs
+T_LINE = dict(color="0.3", lw=1.0, ls=":", zorder=0.5)  # profile times in the trace
+
+
+def panel_label(ax, letter=None, text=None, **kw):
+    """Bold panel letter, then the panel's identifier in normal weight."""
+    s = (rf"$\mathbf{{{letter}}}$" if letter else "") + (
+        ("  " if letter else "") + text if text else ""
+    )
+    ax.text(0.0, 1.02, s, transform=ax.transAxes, ha="left", va="bottom", **kw)
+
+
+def model_roles(label1, label2):
+    """Role (colour) of each model from its legend label; distinct fallbacks."""
+    r1 = style.role_of(label1)
+    r1 = r1 if r1 in style.COLORS and r1 != "fit" else "finetuned"
+    r2 = style.role_of(label2)
+    if r2 not in style.COLORS or r2 == "fit" or r2 == r1:
+        r2 = next(r for r in ("zero_shot", "scratch", "finetuned") if r != r1)
+    return r1, r2
+
+
+def model_handle(color, band=True, marker="o"):
+    """Legend handle of a model: its line over its +-1 sigma band."""
+    ln = Line2D([], [], color=color, lw=1.4, marker=marker, ms=3)
+    return (Patch(color=color, alpha=style.BAND_ALPHA, lw=0), ln) if band else ln
+
+
+def rowwise(hh, ll, ncol):
+    """Reorder legend entries so that rows read left to right."""
+    nrow = -(-len(hh) // ncol)
+    hh = hh + [Line2D([], [], ls="")] * (nrow * ncol - len(hh))
+    ll = ll + [""] * (nrow * ncol - len(ll))
+    idx = [r * ncol + c for c in range(ncol) for r in range(nrow)]
+    return [hh[i] for i in idx], [ll[i] for i in idx]
+
+
+def trace_only_figure(args, D, tnames, xm, xs, order, tax, f0, f1, T, m1, m2, xlab):
+    """Time trace of one chord, models with bands and median absolute errors.
+
+    The median absolute error |model - conventional fit| of each model is
+    taken over the labelled frames (finite fit) of the chord: inside the shown
+    window [t0, t1] (--mae-range window, default) or over the whole discharge
+    (--mae-range discharge). Model values are those at the fitted frames.
+    """
+    import re
+
+    c = order[int(np.argmin(np.abs(xs - args.trace_x)))]
+    fr = np.arange(max(f0, 0), min(f1, T - 1) + 1)
+    tt = tax[fr]
+    mae_fr = fr if args.mae_range == "window" else np.arange(T)
+    sym = (xlab.split("(")[0].strip() or "chord") if args.profile_x else "chord"
+    ident = f"{sym} = {xm[c]:.2f} m" if args.profile_x else f"chord {c}"
+    m_ = re.search(r"(\d{6})", str(args.shot or args.preds))
+    if m_:
+        ident = f"discharge {m_.group(1)},  {ident}"
+    stats = {}
+    for ctx, ext in (("talk", "png"), ("paper", "pdf")):
+        with sns.plotting_context(ctx):
+            nt = len(tnames)
+            size = (PAPER_W, 1.2 + 1.5 * nt) if ctx == "paper" else (10, 2.2 + 2.8 * nt)
+            fig, axs = plt.subplots(nt, 1, figsize=size, sharex=True, squeeze=False,
+                                    layout="constrained")
+            lw, ms = (1.0, 2.0) if ctx == "paper" else (1.5, 3.0)
+            hh, ll, maes = [], [], []  # per model: handle, name, MAE texts
+            for r_, k in enumerate(tnames):
+                d = D[k]
+                ax = axs[r_, 0]
+                unit = d["unit"].split("(")[-1].rstrip(")")
+                y_all = d["y"][c]
+                for i_, (src_mu, src_ps, (col, band), lab) in enumerate((
+                    (d["mu"], d["ps"], m1, args.label1),
+                    (d["mu2"], d["ps2"], m2, args.label2),
+                )):
+                    if src_mu is None:
+                        continue
+                    m_t = src_mu[c, fr]
+                    if src_ps is not None:
+                        ax.fill_between(tt, m_t - src_ps[c, fr], m_t + src_ps[c, fr],
+                                        color=col, alpha=style.BAND_ALPHA, lw=0, zorder=1)
+                    ax.plot(tt, m_t, "-", color=col, lw=lw, marker="o", ms=ms, zorder=2)
+                    fm = np.isfinite(y_all[mae_fr])
+                    err = np.abs(src_mu[c, mae_fr][fm] - y_all[mae_fr][fm])
+                    mae = float(np.median(err)) if err.size else np.nan
+                    stats[(d["name"], lab)] = (mae, int(err.size))
+                    if r_ == 0:
+                        hh.append(model_handle(col, band, marker="o"))
+                        ll.append(lab)
+                        maes.append([])
+                    # median absolute error per target into the model's legend text
+                    name = style.TARGET_SYMBOL[d["name"]] + " " if nt > 1 else ""
+                    maes[i_].append(f"{name}MAE {mae:.3g} {unit}")
+                yt = y_all[fr]
+                fm = np.isfinite(yt)
+                style.fit_points(ax, tt[fm], yt[fm], d["sl"][c, fr][fm], ms=ms,
+                                 elinewidth=0.6 * lw)
+                # y-limits from the curves and fits in the window (not the bands)
+                vals = np.concatenate(
+                    [d["mu"][c, fr], yt[fm]]
+                    + ([d["mu2"][c, fr]] if d["mu2"] is not None else [])
+                )
+                vals = vals[np.isfinite(vals)]
+                if args.ylim is not None and k == 1:
+                    ax.set_ylim(*args.ylim)
+                elif vals.size:
+                    lo, hi = vals.min(), vals.max()
+                    pad = 0.1 * max(hi - lo, 1e-6)
+                    ax.set_ylim(lo - pad, hi + pad)
+                ax.set_xlim(tt[0], tt[-1])
+                ax.set_ylabel(d["unit"])
+                letter = "abcdefgh"[r_] if nt > 1 else None
+                panel_label(ax, letter, ident if r_ == 0 else None)
+            axs[-1, 0].set_xlabel(style.TIME_LABEL)
+            ll = [f"{lab}: " + ", ".join(m_) for lab, m_ in zip(ll, maes)]
+            hh.insert(0, Line2D([], [], color=style.COLORS["fit"], marker="o", ls="",
+                                ms=3))
+            ll.insert(0, style.NAMES["fit"])
+            _fig_ordered_legend(fig, hh, ll, ctx)
+            fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches=bbox(ext))
+            plt.close(fig)
+    rng = (f"labelled frames in {tax[fr[0]]:.3f}-{tax[fr[-1]]:.3f} s"
+           if args.mae_range == "window" else "labelled frames of the whole discharge")
+    print(f"median absolute error vs conventional fit, chord {c} ({ident}), {rng}:")
+    for (tn, lab), (mae, n) in stats.items():
+        print(f"  {tn:4s} {lab}: {mae:.4g} (n={n})")
+    print(f"wrote {args.out}/{args.out_name}.png/.pdf | trace only, chord {c}")
+
+
+def _fig_ordered_legend(fig, hh, ll, ctx):
+    """Figure legend above the panels, fit first, then the models by role."""
+    rank = {r: i for i, r in enumerate(style.LEGEND_ORDER)}
+    order = sorted(range(len(hh)), key=lambda i: (
+        0 if i == 0 else 1 + rank.get(style.role_of(ll[i].split(":")[0]), len(rank))))
+    return fig.legend(
+        [hh[i] for i in order], [ll[i] for i in order], loc="outside upper center",
+        ncol=1,
+        fontsize="x-small" if ctx == "paper" else "small", frameon=False,
+    )
 
 
 def main():
@@ -137,6 +275,22 @@ def main():
         action="store_true",
         help="omit the first profile as a grey reference in later panels",
     )
+    p.add_argument(
+        "--trace-only",
+        action="store_true",
+        help="only the time trace of the --trace-x chord over [t0, t1] (one panel "
+        "per --target), each model with its band and its median absolute error "
+        "against the conventional fit in its legend entry; no profiles, no "
+        "equilibrium",
+    )
+    p.add_argument(
+        "--mae-range",
+        choices=("window", "discharge"),
+        default="window",
+        help="--trace-only: frames of the median absolute error -- the labelled "
+        "frames of the chord inside [t0, t1] (window, default) or in the whole "
+        "discharge",
+    )
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", type=str, default="event_panels")
     args = p.parse_args()
@@ -155,7 +309,7 @@ def main():
             raise SystemExit("--preds2 must be a dump of the same discharge")
     for k in tnames:
         kk = 1.0 if args.k is None else args.k[k]
-        sc = 1.0 if k == 1 else 1e-3  # T_i displayed in keV
+        sc = style.TARGET_SCALE["vtor" if k == 1 else "ti"]  # T_i displayed in keV
         D[k] = dict(
             y=dmp.y[..., k] * sc,
             sl=dmp.sigma[..., k] * sc,
@@ -167,11 +321,16 @@ def main():
                 if d2 is not None and d2.pred_sigma is not None
                 else None
             ),
-            unit="$v_{tor}$ (km/s)" if k == 1 else "$T_i$ (keV)",
+            unit=style.TARGET_LABEL["vtor" if k == 1 else "ti"],
+            name="vtor" if k == 1 else "ti",
         )
     k0 = tnames[0]
     y = D[k0]["y"]  # frame/chord selection from the first target (v_tor if drawn)
     mu2 = D[k0]["mu2"]
+    role1, role2 = model_roles(args.label1, args.label2 if d2 is not None else None)
+    col1, col2 = style.COLORS[role1], style.COLORS[role2]
+    band1 = dmp.pred_sigma is not None
+    band2 = d2 is not None and d2.pred_sigma is not None
 
     efit = None
     if args.efit is not None:
@@ -244,6 +403,13 @@ def main():
     dx = np.diff(xs)
     step = float(np.median(dx)) if dx.size else 0.5
 
+    if args.trace_only:
+        if args.trace_x is None:
+            raise SystemExit("--trace-only needs --trace-x (coordinate of the chord)")
+        trace_only_figure(args, D, tnames, xm, xs, order, tax, f0, f1, T,
+                          (col1, band1), (col2, band2), xlab)
+        return
+
     for ctx, ext in (("talk", "png"), ("paper", "pdf")):
         with sns.plotting_context(ctx):
             n = len(frames)
@@ -279,6 +445,8 @@ def main():
             )
             size = (w_fig, base_h) if ctx == "paper" else (w_fig, base_h * 1.75)
             fig = plt.figure(figsize=size)
+            letters = iter("abcdefghijklmnop")  # row-major: equilibrium, times, trace
+            lw_p, ms_f = (1.0, 2.0) if ctx == "paper" else (1.5, 2.6)
             prof_h_in = (
                 (size[1]) * 0.86 * nt / sum(hr)
             )  # equilibrium spans all profile rows
@@ -354,28 +522,23 @@ def main():
                     efit["r_axis"][ie],
                     efit["z_axis"][ie],
                     "+",
-                    color="C3",
+                    color="k",
                     ms=6,
                     mew=1.2,
                 )
                 axe.plot(
-                    xs, np.zeros_like(xs), "|", color="C0", ms=5, mew=0.8, zorder=4
+                    xs, np.zeros_like(xs), "|", color="0.25", ms=5, mew=0.8, zorder=4
                 )
                 if c_tr is not None:
-                    axe.plot([xm[c_tr]], [0.0], "o", color="C0", ms=4, zorder=5)
+                    axe.plot([xm[c_tr]], [0.0], "o", mfc="white", mec="k", ms=4,
+                             mew=1.0, zorder=5)
                 axe.set_xlim(r_lo, r_hi)
                 axe.set_ylim(z_lo, z_hi)
                 axe.set_aspect("equal", adjustable="box")
                 axe.set_anchor("W")
                 axe.set_zorder(prow[tnames[0]][0].get_zorder() - 1)
-                axe.set_title(
-                    (
-                        "equilibrium at $t_0$"
-                        if not args.no_reference
-                        else f"equilibrium, t = {efit['time_s'][ie]:.3f} s"
-                    ),
-                    fontsize="small",
-                )
+                panel_label(axe, next(letters), f"t = {efit['time_s'][ie]:.3f} s",
+                            fontsize="small")
                 axe.tick_params(labelsize="x-small")
                 axe.set_xlabel("$R$ (m)", fontsize="small")
                 axe.set_ylabel("$Z$ (m)", fontsize="small")
@@ -417,8 +580,8 @@ def main():
                             m_ - s_,
                             m_ + s_,
                             where=~nf,
-                            color="C0",
-                            alpha=0.22,
+                            color=col1,
+                            alpha=style.BAND_ALPHA,
                             lw=0,
                             zorder=1,
                         )
@@ -427,7 +590,7 @@ def main():
                             m_ - s_,
                             m_ + s_,
                             where=nof_ext,
-                            color="C0",
+                            color=col1,
                             alpha=0.07,
                             lw=0,
                             zorder=1,
@@ -441,7 +604,7 @@ def main():
                             lw=1.0,
                             zorder=1.5,
                         )
-                    ax.plot(xs, m_, "-", color="C0", lw=1.5, zorder=2)
+                    ax.plot(xs, m_, "-", color=col1, lw=lw_p, zorder=2)
                     if mu2_ is not None:
                         m2 = mu2_[order, f]
                         if ps2_ is not None:
@@ -451,28 +614,20 @@ def main():
                                 m2 - s2,
                                 m2 + s2,
                                 where=~nf,
-                                color="C1",
-                                alpha=0.15,
+                                color=col2,
+                                alpha=style.BAND_ALPHA,
                                 lw=0,
                                 zorder=1,
                             )
-                        ax.plot(xs, m2, "-", color="C1", lw=1.3, zorder=2)
-                    ax.errorbar(
-                        xs[fitm],
-                        yy[fitm],
-                        yerr=sl_[order, f][fitm],
-                        fmt="o",
-                        ms=2.6,
-                        lw=0.6,
-                        color="k",
-                        ecolor="0.45",
-                        zorder=3,
-                    )
+                        ax.plot(xs, m2, "-", color=col2, lw=lw_p, zorder=2)
+                    style.fit_points(ax, xs[fitm], yy[fitm], sl_[order, f][fitm],
+                                     ms=ms_f, elinewidth=0.6)
                     ax.set_ylim(*d["ylim"])
                     ax.set_xlim(xs[0] - 0.5 * step, xs[-1] + 0.5 * step)
-                    if r_ == 0:
+                    if r_ == 0:  # one letter per column (v_tor and T_i at that time)
                         tlabel = "$t_0$" if (j == 0 and not args.no_reference) else "t"
-                        ax.set_title(f"{tlabel} = {tax[f]:.3f} s", fontsize="small")
+                        panel_label(ax, next(letters), f"{tlabel} = {tax[f]:.3f} s",
+                                    fontsize="small")
                     if r_ == nt - 1:
                         ax.set_xlabel(xlab, fontsize="small")
                     else:
@@ -484,13 +639,16 @@ def main():
                 fr = np.arange(max(f0, 0), min(f1, T - 1) + 1)
                 tt = tax[fr]
                 ax_prev = None
+                trace_letter = next(letters)
                 for r_, k in enumerate(tnames):
                     d = D[k]
                     axt = fig.add_subplot(gs_bot[r_, 0], sharex=ax_prev)
                     ax_prev = axt
+                    for f in frames:  # times of the profile panels
+                        axt.axvline(tax[f], **T_LINE)
                     for src_mu, src_ps, col, lw in (
-                        (d["mu"], d["ps"], "C0", 1.5),
-                        (d["mu2"], d["ps2"], "C1", 1.3),
+                        (d["mu"], d["ps"], col1, lw_p),
+                        (d["mu2"], d["ps2"], col2, lw_p),
                     ):
                         if src_mu is None:
                             continue
@@ -501,61 +659,53 @@ def main():
                                 m_t - src_ps[c, fr],
                                 m_t + src_ps[c, fr],
                                 color=col,
-                                alpha=0.2,
+                                alpha=style.BAND_ALPHA,
                                 lw=0,
                             )
                         axt.plot(tt, m_t, "-", color=col, lw=lw, zorder=2)
-                        axt.plot(tt, m_t, "o", color=col, ms=2.2, zorder=2.5)
+                        axt.plot(tt, m_t, "o", color=col, ms=0.8 * ms_f, zorder=2.5)
                     yt = d["y"][c, fr]
                     fm = np.isfinite(yt)
-                    axt.errorbar(
-                        tt[fm],
-                        yt[fm],
-                        yerr=d["sl"][c, fr][fm],
-                        fmt="o",
-                        ms=2.6,
-                        lw=0.6,
-                        color="k",
-                        ecolor="0.45",
-                        zorder=3,
-                    )
+                    style.fit_points(axt, tt[fm], yt[fm], d["sl"][c, fr][fm], ms=ms_f,
+                                     elinewidth=0.6)
                     axt.set_xlim(tt[0], tt[-1])
                     axt.set_ylim(*d["ylim"])
                     axt.set_ylabel(d["unit"])
                     if r_ == 0:
-                        axt.set_title(
-                            f"{xlab.split('(')[0].strip()} = {xm[c]:.2f} m, model "
-                            f"every {1000 / FS:.0f} ms",
-                            fontsize="small",
-                        )
+                        ident = (f"{xlab.split('(')[0].strip()} = {xm[c]:.2f} m"
+                                 if args.profile_x else f"chord {c}")
+                        panel_label(axt, trace_letter, ident, fontsize="small")
                     if r_ == nt - 1:
-                        axt.set_xlabel("time (s)", fontsize="small")
+                        axt.set_xlabel(style.TIME_LABEL, fontsize="small")
                     else:
                         plt.setp(axt.get_xticklabels(), visible=False)
-            hh = [
-                Line2D([], [], color="C0", lw=1.5, marker="o", ms=3),
-                Patch(color="C0", alpha=0.3),
-                Line2D([], [], color="k", marker="o", ls="", ms=3),
-            ]
-            ll = [
-                args.label1,
-                "model uncertainty",
-                "conventional fit and uncertainty",
-            ]
+            # legend: fit, the models in the fixed role order, then the extras
+            rank = {r: i for i, r in enumerate(style.LEGEND_ORDER)}
+            mods = [(rank.get(style.role_of(args.label1), 9), model_handle(col1, band1),
+                     args.label1)]
+            if mu2 is not None:
+                mods.append((rank.get(style.role_of(args.label2), 10),
+                             model_handle(col2, band2), args.label2))
+            mods.sort(key=lambda m_: m_[0])
+            hh = [Line2D([], [], color=style.COLORS["fit"], marker="o", ls="", ms=3)]
+            ll = [style.NAMES["fit"]]
+            hh += [m_[1] for m_ in mods]
+            ll += [m_[2] for m_ in mods]
+            if not args.no_reference:
+                hh.append(Line2D([], [], color="0.55", ls="--", lw=1.0))
+                ll.append("model at $t_0$")
+            if trace:
+                hh.append(Line2D([], [], **T_LINE))
+                ll.append("profile times")
             if (
                 args.legend_no_fit
             ):  # the grey band is explained in the caption by default
                 hh.append(Patch(color="0.9"))
                 ll.append("no conventional fit")
-            if mu2 is not None:
-                hh.insert(1, Line2D([], [], color="C1", lw=1.3, marker="o", ms=3))
-                ll.insert(1, args.label2)
-            if not args.no_reference:
-                hh.insert(1, Line2D([], [], color="0.55", ls="--", lw=1.0))
-                ll.insert(1, "model at $t_0$")
             ncol = (
                 len(hh) if sum(len(x) for x in ll) < 95 else (len(hh) + 1) // 2
             )  # wrap when wider than the page
+            hh, ll = rowwise(hh, ll, ncol)
             top = (0.93 if trace else 0.86) - (0.025 if ncol < len(hh) else 0.0)
             fig.subplots_adjust(
                 left=0.105, right=0.97, bottom=0.07 if nt > 1 else 0.10, top=top - 0.03
