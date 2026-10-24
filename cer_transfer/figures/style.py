@@ -1,8 +1,10 @@
 r"""Conventions shared by every paper figure.
 
-Colours (fixed everywhere): conventional fit = black points with error bars;
-DIII-D model (zero-shot) = green; NSTX model (from scratch) = red;
-DIII-D+NSTX model (fine-tuned) = blue; beam-off phase = grey band. Model
+Colours (fixed everywhere): target (conventional fit) = black points with error bars;
+DIII-D model (zero-shot) = green; NSTX model (from scratch) = blue;
+DIII-D+NSTX model (fine-tuned) = red; NSTX-U models: NSTX-U model (from scratch) =
+brown, DIII-D model fine-tuned on NSTX-U = pink, DIII-D+NSTX model fine-tuned on NSTX-U
+= dark gold; beam-off phase = grey band. Model
 uncertainty = band of the model's colour, 20 % alpha, +-1 sigma.
 Legend order always: fit, zero-shot, scratch, fine-tuned.
 Units in the axis labels; no titles inside panels; panel letters a, b, c, ...
@@ -17,14 +19,17 @@ import numpy as np
 COLORS = {
     "fit": "black",
     "zero_shot": "#2ca02c",   # green
-    "scratch": "#d62728",     # red
-    "finetuned": "#1f77b4",   # blue
+    "scratch": "#1f77b4",     # blue
+    "finetuned": "#d62728",   # red (distinct from the green zero-shot model)
+    "nstxu_scratch": "#8c564b",       # brown: NSTX-U model (from scratch on NSTX-U)
+    "nstxu_ft_d3d": "#e377c2",        # pink: DIII-D model fine-tuned on NSTX-U
+    "nstxu_ft_d3d_nstx": "#b8860b",   # dark gold: DIII-D+NSTX model fine-tuned on NSTX-U
 }
 BAND_ALPHA = 0.20
 BEAMOFF_COLOR = "0.85"       # grey band of a beam-off phase
 LEGEND_ORDER = ("fit", "zero_shot", "scratch", "finetuned")
 NAMES = {
-    "fit": "conventional fit",
+    "fit": "target",  # the conventional fit, the training target
     "zero_shot": "DIII-D model",
     "scratch": "NSTX model",
     "finetuned": "DIII-D+NSTX model",
@@ -38,6 +43,15 @@ RTAN_LABEL = r"$R_\mathrm{tan}$ (m)"
 TARGET_LABEL = {"ti": TI_LABEL, "vtor": VTOR_LABEL}
 TARGET_SYMBOL = {"ti": r"$T_\mathrm{i}$", "vtor": r"$v_\mathrm{tor}$"}
 TARGET_SCALE = {"ti": 1e-3, "vtor": 1.0}  # canonical (eV, km/s) -> displayed (keV, km/s)
+TARGET_UNIT = {"ti": "keV", "vtor": "km/s"}
+
+
+def target_rec_labels(name):
+    """Axis labels of a reconstruction-vs-target plot: ('$T_\\mathrm{i}^\\mathrm{target}$ (keV)',
+    '$T_\\mathrm{i}^\\mathrm{rec}$ (keV)'); rec = reconstruction."""
+    sym = TARGET_SYMBOL[name][:-1]  # without the closing $
+    unit = TARGET_UNIT[name]
+    return sym + r"^\mathrm{target}$ (" + unit + ")", sym + r"^\mathrm{rec}$ (" + unit + ")"
 
 
 def role_of(label: str | None) -> str | None:

@@ -138,6 +138,52 @@ def draw_rejoin(ax, checks, tsc, tgt):
     ax.set_ylabel(f"$|{sym} - {sym}^\\mathrm{{fit}}|$ ({unit})")
 
 
+def load_bridge(path, tmin, splits=("val", "test")):
+    """Rows of analysis.beamoff_bridge (per gap, chord, target) on held-out discharges with
+    the gap starting at or after ``tmin`` s (flat-top: no ramp-up gaps). The gap start
+    times come from ``<path stem>_tstart.npy`` next to the npz."""
+    z = dict(np.load(path, allow_pickle=False))
+    ts = z["t_start"] if "t_start" in z else np.load(Path(path).with_name(Path(path).stem + "_tstart.npy"))
+    keep = np.isin(z["split"], splits) & (ts >= tmin)
+    out = {q: v[keep] for q, v in z.items() if np.ndim(v) and len(v) == len(keep)}
+    out["models"] = list(z["models"])
+    return out
+
+
+def draw_bridge(ax, br, tgt, mi, color):
+    """Predicted vs actual change across the gap: x = first fit after - last fit before,
+    y = model at the last beam-off frame - last fit before. Diagonal: the model knew
+    where the plasma went; y = 0: holding the last fit."""
+    j = TARGETS.index(tgt)
+    sel = br["target"] == j
+    tsc = TARGET_SCALE[tgt]
+    act = (br["after"] - br["before"])[sel] * tsc
+    pre = (br[f"model_{mi}"] - br["before"])[sel] * tsc
+    lim = np.percentile(np.abs(np.r_[act, pre]), 99) * 1.05
+    ax.plot([-lim, lim], [-lim, lim], "-", color="0.25", lw=0.9, zorder=1)
+    ax.axhline(0, color="0.25", lw=0.9, ls="--", zorder=1)
+    ax.scatter(act, pre, s=4, color=color, alpha=0.35, lw=0, zorder=2, rasterized=True)
+    ax.set_xlim(-lim, lim)
+    ax.set_ylim(-lim, lim)
+    ax.set_aspect("equal")
+    # the two reference lines labelled where they are drawn
+    ax.text(0.45 * lim, 0.45 * lim, "model knew the change", rotation=45, rotation_mode="anchor",
+            ha="center", va="bottom", fontsize="x-small", color="0.25", transform_rotates_text=True)
+    ax.text(-0.95 * lim, 0.02 * lim, "hold last fit", ha="left", va="bottom", fontsize="x-small", color="0.25")
+    unit = TARGET_LABEL[tgt].split("(")[-1].rstrip(")")
+    sym = TARGET_SYMBOL[tgt].strip("$")
+    ax.set_xlabel(f"actual change $\\Delta {sym}$ ({unit})")
+    ax.set_ylabel(f"predicted change ({unit})")
+    err = np.median(np.abs(pre - act))
+    hold = np.median(np.abs(act))
+    ax.text(0.97, 0.03, f"median |error|\nmodel {err:.2g} {unit}\nhold {hold:.2g} {unit}", transform=ax.transAxes,
+            ha="right", va="bottom", fontsize="x-small")
+    gaps = len({(e, a) for e, a in zip(br["entry"][sel], br["gap_a"][sel])})
+    print(f"bridge {tgt} ({br['models'][mi]}): {sel.sum()} cases in {gaps} gaps; median |error| "
+          f"{err:.3g}, hold {hold:.3g} {unit}; slope {np.polyfit(act, pre, 1)[0]:.2f}")
+    return gaps, int(sel.sum())
+
+
 def rotating_context(y, a, b, fs, context_ms, min_rot, min_fits, chord=None):
     """Return True if the plasma rotates on both sides of the phase (a, b).
 
@@ -224,6 +270,8 @@ def main():
     p.add_argument("--scan-limit", type=int, default=0)
     p.add_argument("--n", type=int, default=2)
     p.add_argument("--chord", type=int, default=2)
+    p.add_argument("--chords", type=int, nargs="+", default=None,
+                   help="chord per example (order of --shots); default --chord for all")
     p.add_argument("--target", choices=("ti", "vtor"), default="vtor")
     p.add_argument("--min-off-ms", type=float, default=50.0)
     p.add_argument("--fs", type=float, default=FRAME_HZ)
@@ -291,6 +339,11 @@ def main():
         help="npz of cer_transfer.analysis.beamoff_checks --dump: adds the bottom row "
         "(context ablation and rejoin error over all beam-off phases)",
     )
+    p.add_argument("--bridge", type=Path, default=None,
+                   help="npz of cer_transfer.analysis.beamoff_bridge: bottom row = predicted vs "
+                   "actual change across the gap, (c) v_tor, (d) T_i, second model (--checkpoint2)")
+    p.add_argument("--bridge-tmin", type=float, default=0.25,
+                   help="flat-top: only gaps starting at or after this time (s)")
     args = p.parse_args()
     from cer_transfer.inference import load_model, predict_file
 
@@ -324,7 +377,9 @@ def main():
     if not cands:
         raise SystemExit("no beam-off phase found")
     cands.sort()
-    if args.shots:
+    if args.shots:  # in the order of --shots
+        order = {s_: q for q, s_ in enumerate(args.shots)}
+        cands.sort(key=lambda c_: next(q for s_, q in order.items() if s_ in c_[1]))
         chosen = cands[: args.n]
     else:  # representative: around the median phase length
         mid = len(cands) // 2
@@ -360,6 +415,10 @@ def main():
     checks = None
     if args.checks is not None:
         checks = load_checks(args.checks, tgt, args.fs)
+    bridge = load_bridge(args.bridge, args.bridge_tmin) if args.bridge is not None else None
+    if bridge is not None:
+        checks = True  # bottom row present (layout)
+    chords = args.chords or [args.chord] * len(chosen)
     n = len(chosen)
     args.out.mkdir(parents=True, exist_ok=True)
     # NBI power from the discharge files (key 'nbi_power_MW' (T,)), time-aligned
@@ -382,16 +441,17 @@ def main():
             if checks:
                 outer = fig.add_gridspec(2, 1, height_ratios=[sum(hr_top) * 1.05, 1.0], hspace=0.42, **mar)
                 gtop = outer[0].subgridspec(len(hr_top), n, height_ratios=hr_top, hspace=0.08, wspace=0.25)
-                gbot = outer[1].subgridspec(1, 2, wspace=0.3, width_ratios=[1.25, 1])
+                gbot = outer[1].subgridspec(1, 2, wspace=0.3, width_ratios=[1, 1] if bridge is not None else [1.25, 1])
             else:
                 gtop = fig.add_gridspec(len(hr_top), n, height_ratios=hr_top, hspace=0.08, wspace=0.25, **mar)
             axes = [[fig.add_subplot(gtop[0, j]) for j in range(n)]]
             if has_nbi:
                 axes.append([fig.add_subplot(gtop[1, j], sharex=axes[0][j]) for j in range(n)])
             for i, (ax, (dur, e, (a, b)), r) in enumerate(zip(axes[0], chosen, res)):
-                pr = r.pred[args.chord, :, k] * tsc
-                ps = r.pred_sigma[args.chord, :, k] * args.k[k] * tsc
-                y = r.y[args.chord, :, k] * tsc
+                ch = chords[i]
+                pr = r.pred[ch, :, k] * tsc
+                ps = r.pred_sigma[ch, :, k] * args.k[k] * tsc
+                y = r.y[ch, :, k] * tsc
                 T = pr.shape[0]
                 t = file_times(e, T, args.fs, args.t_offset)  # time_s from the file when present
                 mb = args.margin_before or [args.margin]
@@ -402,11 +462,11 @@ def main():
                 beamoff_band(ax, t[a] - 0.5 / args.fs, t[b] + 0.5 / args.fs, label="beam off")
                 model_line(ax, t[w], pr[w], ps[w], role=role1, label=args.label, ms=2.5, lw=1.2)
                 if res2 is not None:
-                    pr2 = res2[i].pred[args.chord, :, k] * tsc
-                    ps2 = res2[i].pred_sigma[args.chord, :, k] * args.k2[k] * tsc
+                    pr2 = res2[i].pred[ch, :, k] * tsc
+                    ps2 = res2[i].pred_sigma[ch, :, k] * args.k2[k] * tsc
                     model_line(ax, t[w], pr2[w], ps2[w], role=role2, label=args.label2, ms=2.5, lw=1.2)
                 mm = np.isfinite(y[w])
-                ysig = r.sigma[args.chord, :, k] * tsc
+                ysig = r.sigma[ch, :, k] * tsc
                 fit_points(ax, t[w][mm], y[w][mm], ysig[w][mm], label=NAMES["fit"])
                 ax.set_xlim(t[f0], t[f1])
                 shot = "".join(ch for ch in Path(e).stem if ch.isdigit())
@@ -427,7 +487,14 @@ def main():
                 else:
                     ax.set_xlabel(TIME_LABEL)
             h, l_ = axes[0][0].get_legend_handles_labels()
-            if checks:
+            if bridge is not None:
+                axc, axd = fig.add_subplot(gbot[0, 0]), fig.add_subplot(gbot[0, 1])
+                mi = len(bridge["models"]) - 1  # the fine-tuned model (last in the npz)
+                g, nc = draw_bridge(axc, bridge, "vtor", mi, COLORS[role2])
+                draw_bridge(axd, bridge, "ti", mi, COLORS[role2])
+                panel_label(axc, "c", f"{g} beam-off phases, held-out discharges")
+                panel_label(axd, "d")
+            elif checks:
                 axc, axd = fig.add_subplot(gbot[0, 0]), fig.add_subplot(gbot[0, 1])
                 draw_context(axc, checks, tsc, tgt)
                 draw_rejoin(axd, checks, tsc, tgt)

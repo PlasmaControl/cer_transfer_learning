@@ -291,6 +291,7 @@ def main():
             gate = None
 
     spec = None
+    nbi = None  # total NBI power (MW) from the discharge file: thin row under the time columns
     if args.shot is not None:
         from joblib import load
 
@@ -298,6 +299,9 @@ def main():
         end = int(s["end_index"])
         if end <= 0:  # <= 0 means the whole recording
             end = s["input"].shape[1]
+        # wavelength of every bin (nm), stored with the spectra; bins if absent
+        wl = np.asarray(s["wavelength_nm"], float) if "wavelength_nm" in s else None
+        nbi = np.asarray(s["nbi_power_MW"], float) if "nbi_power_MW" in s else None
         spec = {
             cc: np.asarray(s["input"][cc, :end, :], dtype=np.float32)
             for cc in tr_chords
@@ -343,20 +347,17 @@ def main():
     t_prof = [t_s[f_lab]] + ([t_s[f_unl]] if f_unl is not None else [])
     t1 = max(t1, max(t_prof) + 0.01)
 
-    # trace y-limits per target, shared by the chords: from the model curves and
-    # fits inside the gate (not from the bands)
+    # trace y-limits per chord and target (not shared between chords): from the
+    # model curves and fits inside the gate (not from the bands)
     tr_ylim = {}
     for k in (1, 0):
-        vals = []
         for cc in tr_chords:
-            for mu_, _, _ in models:
-                vals.append(mu_[cc, gm, k])
-            vals.append(y[cc, gm, k])
-        v = np.concatenate([x_[np.isfinite(x_)] for x_ in vals])
-        if v.size:
-            lo, hi = np.percentile(v, [1, 99])
-            pad = 0.12 * max(hi - lo, 1e-6)
-            tr_ylim[k] = (lo - pad, hi + pad)
+            vals = [mu_[cc, gm, k] for mu_, _, _ in models] + [y[cc, gm, k]]
+            v = np.concatenate([x_[np.isfinite(x_)] for x_ in vals])
+            if v.size:
+                lo, hi = np.percentile(v, [1, 99])
+                pad = 0.12 * max(hi - lo, 1e-6)
+                tr_ylim[(cc, k)] = (lo - pad, hi + pad)
 
     # layout: per row the cells [(kind, chord, target)]
     if args.vtor_only:
@@ -399,8 +400,8 @@ def main():
         ax.axvline(t_s[f_lab], ls=LS_LAB, **T_LINE)
         if f_unl is not None:
             ax.axvline(t_s[f_unl], ls=LS_UNL, **T_LINE)
-        if k in tr_ylim:
-            ax.set_ylim(*tr_ylim[k])
+        if (cc, k) in tr_ylim:
+            ax.set_ylim(*tr_ylim[(cc, k)])
         ax.set_xlim(t0, t1)
         ax.set_ylabel(style.TARGET_LABEL["ti" if k == 0 else "vtor"])
 
@@ -456,19 +457,23 @@ def main():
                 sz.update(lw_t=1.1, ms_t=1.6, lw_p=1.3, ms_p=2.0, elw=0.5)
             nr = len(rows)
             if ctx == "paper":
-                size = (PAPER_W, 2.5) if args.vtor_only else (PAPER_W, 4.0)
+                size = (PAPER_W, 2.5) if args.vtor_only else (PAPER_W, 4.0 + (0.5 if nbi is not None else 0))
             else:
-                size = (18, 5.2) if args.vtor_only else (18, 9)
+                size = (18, 5.2) if args.vtor_only else (18, 9 + (1.2 if nbi is not None else 0))
             fig = plt.figure(figsize=size, layout="constrained")
             fig.get_layout_engine().set(w_pad=0.03, h_pad=0.03, wspace=0.04, hspace=0.06, rect=(0, 0, 0.985, 1))
-            gs = fig.add_gridspec(nr, ncols, width_ratios=wr)
+            has_nbi = nbi is not None
+            gs = fig.add_gridspec(nr + int(has_nbi), ncols, width_ratios=wr,
+                                  height_ratios=[1] * nr + ([0.3] if has_nbi else []))
             axes = np.empty((nr, ncols), dtype=object)
             letters = iter("abcdefghijklmnop")
             first_col_ax = {}
             for r, cells in enumerate(rows):
                 for cix, (kind, cc, k) in enumerate(cells):
                     share = first_col_ax.get(cix)
-                    ax = fig.add_subplot(gs[r, cix], sharex=share)
+                    # last-row profile reaches into the NBI row: its R axis sits at the bottom
+                    cell = gs[r:, cix] if (has_nbi and kind == "prof" and r == nr - 1) else gs[r, cix]
+                    ax = fig.add_subplot(cell, sharex=share)
                     first_col_ax.setdefault(cix, ax)
                     axes[r, cix] = ax
                     if kind == "spec":
@@ -479,9 +484,10 @@ def main():
                             aspect="auto",
                             origin="lower",
                             cmap="magma",
-                            extent=[t_s[0], t_s[min(len(sp) - 1, T - 1)], 0, z.shape[0]],
+                            extent=[t_s[0], t_s[min(len(sp) - 1, T - 1)],
+                                    *((wl[0], wl[-1]) if wl is not None else (0, z.shape[0]))],
                         )
-                        ax.set_ylabel("wavelength bin")
+                        ax.set_ylabel("wavelength (nm)" if wl is not None else "wavelength bin")
                         ax.set_xlim(t0, t1)
                         panel_label(ax, next(letters), chord_name(cc))
                     elif kind == "trace":
@@ -490,11 +496,25 @@ def main():
                     else:
                         profile_panel(ax, k)
                         panel_label(ax, next(letters), f"t = {t_s[f_lab]:.3f} s")
-                    last = r == nr - 1
-                    if last:
+                    last = r == nr - 1 and not (has_nbi and kind != "prof")
+                    if last or (r == nr - 1 and kind == "prof"):
                         ax.set_xlabel(xlab if kind == "prof" else style.TIME_LABEL)
                     else:
                         plt.setp(ax.get_xticklabels(), visible=False)
+
+            if has_nbi:  # NBI power under every time column, same time axis
+                for cix, (kind, _, _) in enumerate(rows[-1]):
+                    if kind == "prof":
+                        continue
+                    axn = fig.add_subplot(gs[nr, cix], sharex=first_col_ax[cix])
+                    n_ = min(len(nbi), len(t_s))
+                    axn.plot(t_s[:n_], nbi[:n_], "-", color="0.3", lw=sz["lw_t"] * 1.2)
+                    axn.set_ylim(bottom=0)
+                    axn.set_xlim(t0, t1)
+                    axn.locator_params(axis="y", nbins=2)
+                    axn.set_xlabel(style.TIME_LABEL)
+                    if cix == 0:
+                        axn.set_ylabel(r"$P_\mathrm{NBI}$ (MW)", fontsize="small")
 
             # one legend for the figure, fixed order: fit, models by role, then
             # the no-fit profile and the profile-time markers
@@ -512,7 +532,7 @@ def main():
             ll.append(f"profile time, t = {t_s[f_lab]:.3f} s")
             if f_unl is not None:
                 hh.append(Line2D([], [], color=col1, ls="--", lw=1.2))
-                ll.append(f"{args.label1}, t = {t_s[f_unl]:.3f} s (no conventional fit)")
+                ll.append(f"{args.label1}, t = {t_s[f_unl]:.3f} s (no target)")
                 hh.append(Line2D([], [], ls=LS_UNL, **T_LINE))
                 ll.append(f"profile time without fit, t = {t_s[f_unl]:.3f} s")
             # rows read left to right (matplotlib fills the columns first)

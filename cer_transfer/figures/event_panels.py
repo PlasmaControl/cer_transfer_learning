@@ -701,7 +701,7 @@ def main():
                 args.legend_no_fit
             ):  # the grey band is explained in the caption by default
                 hh.append(Patch(color="0.9"))
-                ll.append("no conventional fit")
+                ll.append("no target")
             ncol = (
                 len(hh) if sum(len(x) for x in ll) < 95 else (len(hh) + 1) // 2
             )  # wrap when wider than the page

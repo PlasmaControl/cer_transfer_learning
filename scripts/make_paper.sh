@@ -228,15 +228,6 @@ EOF
 log "## 6. Figures"
 export BEAMOFF_CK=$D3D BEAMOFF_READOUT=$READOUT BEAMOFF_CK2=${BEAMOFF_CK2-$NSTX} BEAMOFF_CHECKS=$BOCHK ZS_DUMP=$ZSV ZS_TEST=$ZST FT_VAL=$VALDUMP FT_TEST=$FTTEST FTP SCP   # beam-off figure: DIII-D and fine-tuned model   # lists and discharges: defaults in make_figs.sh (the paper's choice)
 scripts/make_figs.sh 2>&1 | grep -E "wrote|SKIP|note|using:|no beam-off" | tee $P/figs.log | sed 's/^/    /' >> $SUMMARY
-# zero-shot rotation figure: DIII-D model vs NSTX model on 115600
-if have $ZS115600 gallery/e115600.npz; then
-  R=gallery; [ -f figs/chords_Rtan_115600.csv ] && R=figs
-  L=$(grep -h 115600 splits/nstx_val.txt | head -1)
-  $RUN -m cer_transfer.figures.recon_composite --preds $ZS115600 --label1 "DIII-D model" \
-      --preds2 gallery/e115600.npz --label2 "$NAME_FT_FULL" ${KTI:+--k2 $KTI $KVT} --shot "$CER_DATA_ROOT/$L" \
-      --t-offset -0.235 --unl-gap 2 --profile-time 0.335 ${R:+--profile-x $R/chords_Rtan_115600.csv} --profile-xlabel '$R_\mathrm{tan}$ (m)' \
-      --out figs --out-name zero_shot_vtor_115600 2>&1 | grep -E "wrote|rror" | sed 's/^/    /' | tee -a $SUMMARY
-fi
 # (scaling figure incl. the zero-shot line and the baseline learning curves: drawn by make_figs.sh above)
 
 log ""; log "## Result"

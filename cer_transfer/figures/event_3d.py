@@ -268,9 +268,9 @@ def main():
         if not args.no_fits:
             hh.append(Line2D([], [], color="k", marker="o", ls="", ms=3))
             ll.append(
-                "conventional fit"
+                "target"
                 if args.no_errorbars
-                else "conventional fit and uncertainty"
+                else "target and uncertainty"
             )
         ax.legend(hh, ll, loc="upper left", fontsize="small", frameon=False)
         fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches="tight")

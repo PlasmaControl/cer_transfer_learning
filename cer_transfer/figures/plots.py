@@ -582,12 +582,12 @@ def cmd_scaling(args):
                 xy=(x0, y0),
                 xytext=(x0 * 2.1, y0 + 0.002),
                 fontsize=8,
-                color="C0",
-                arrowprops=dict(arrowstyle="->", color="C0", lw=1.0),
+                color=style.COLORS["finetuned"],
+                arrowprops=dict(arrowstyle="->", color=style.COLORS["finetuned"], lw=1.0),
             )
             # annotation 2 (optional): equivalence point vs the full from-scratch model
             if getattr(args, "annotate_match", False):
-                ax.axhline(s_full, color="C3", ls=":", lw=1.0, alpha=0.8)
+                ax.axhline(s_full, color=style.COLORS["scratch"], ls=":", lw=1.0, alpha=0.8)
             eq = next((n for n, v in runs if v >= s_full), None)
             if eq is not None and getattr(args, "annotate_match", False):
                 ax.annotate(
@@ -596,8 +596,8 @@ def cmd_scaling(args):
                     xy=(eq, s_full),
                     xytext=(eq * 0.28, s_full + 0.004),
                     fontsize=8,
-                    color="C3",
-                    arrowprops=dict(arrowstyle="->", color="C3", lw=1.0),
+                    color=style.COLORS["scratch"],
+                    arrowprops=dict(arrowstyle="->", color=style.COLORS["scratch"], lw=1.0),
                 )
         if getattr(args, "scratch_full_line", False) and scr:
             n_full, s_full = max(scr)
@@ -741,22 +741,30 @@ def cmd_scaling_targets(args):
         return f("pred"), f("pred_sigma"), f("y"), f("sigma"), T
 
     chords = pd.read_csv(args.trace_chords)
-    c = int(chords.iloc[int(np.argmin(np.abs(chords["x"].to_numpy() - args.trace_x)))]["chord"])
-    rtan = float(chords.set_index("chord").loc[c, "x"])
+    nearest = lambda x: int(chords.iloc[int(np.argmin(np.abs(chords["x"].to_numpy() - x)))]["chord"])
+    # one chord per target: T_i may be shown on a different chord than v_tor (--trace-x-ti)
+    cj = {"vtor": nearest(args.trace_x),
+          "ti": nearest(args.trace_x_ti if args.trace_x_ti is not None else args.trace_x)}
+    rt = {k: float(chords.set_index("chord").loc[cj[k], "x"]) for k in keys}
     models = []
     for path, lab in ((args.trace_preds, args.trace_label), (args.trace_preds2, args.trace_label2)):
         mu, ps, y, sl, T = chord_series(path)
         mae = {}
         for j, k in enumerate(keys):
-            ok = np.isfinite(y[c, :, j])
-            mae[k] = float(np.median(np.abs(mu[c, ok, j] - y[c, ok, j]))) * style.TARGET_SCALE[k]
+            ok = np.isfinite(y[cj[k], :, j])
+            mae[k] = float(np.median(np.abs(mu[cj[k], ok, j] - y[cj[k], ok, j]))) * style.TARGET_SCALE[k]
         models.append((lab, mu, ps, mae))
-        print(f"trace {lab}: chord {c} (R_tan {rtan:.2f} m), MAE over the labelled frames of the "
-              f"discharge: T_i {mae['ti']:.3g} keV, v_tor {mae['vtor']:.3g} km/s")
+        print(f"trace {lab}: MAE over the labelled frames of the discharge: T_i {mae['ti']:.3g} keV "
+              f"(chord {cj['ti']}, R_tan {rt['ti']:.2f} m), v_tor {mae['vtor']:.3g} km/s "
+              f"(chord {cj['vtor']}, R_tan {rt['vtor']:.2f} m)")
     t = file_times(args.trace_shot, T, 200.0, args.trace_t_offset) if args.trace_shot \
         else np.arange(T) / 200.0 + args.trace_t_offset
     fr = np.where((t >= args.trace_t0) & (t <= args.trace_t1))[0]
     shot = (str(args.trace_shot).split("_")[-1].split(".")[0]) if args.trace_shot else ""
+    nbi = None  # total NBI power of the trace discharge: thin panel under panel c
+    if args.trace_shot:
+        dd = load(data_path(args.trace_shot), mmap_mode="r")
+        nbi = np.asarray(dd["nbi_power_MW"], float)[:T] if "nbi_power_MW" in dd else None
 
     def build(ctx):
         size = (PAPER_W, 4.2) if ctx == "paper" else (17, 7.0)
@@ -819,12 +827,14 @@ def cmd_scaling_targets(args):
                 style.ordered_legend(ax, handles=hs, loc="upper left", fontsize=small)
             top_axes.append(ax)
         # panel c: T_i (top) and v_tor (bottom)
-        sub = gs[:, 2].subgridspec(2, 1)
+        sub = gs[:, 2].subgridspec(3 if nbi is not None else 2, 1,
+                                   height_ratios=[1, 1, 0.35] if nbi is not None else [1, 1])
         axc = [fig.add_subplot(sub[0]), None]
         axc[1] = fig.add_subplot(sub[1], sharex=axc[0])
         lw, ms = (1.0, 1.8) if ctx == "paper" else (1.5, 3.0)
         for j, k in enumerate(keys):
             ax = axc[j]
+            c = cj[k]  # the chord of this target
             sc = style.TARGET_SCALE[k]
             hs = []
             for lab, mu, ps, mae in models:
@@ -847,11 +857,23 @@ def cmd_scaling_targets(args):
                 order = sorted(range(len(hs)), key=lambda i: rank.get(style.role_of(hs[i].get_label()), 9))
                 fig.legend([hs[i] for i in order], [hs[i].get_label() for i in order],
                            loc="outside lower right", fontsize=small, frameon=False,
-                           title=f"c: discharge {shot},  $R_\\mathrm{{tan}}$ = {rtan:.2f} m",
+                           title=(f"c: discharge {shot},  $R_\\mathrm{{tan}}$ = {rt['ti']:.2f} m" if cj["ti"] == cj["vtor"]
+                                  else f"c: discharge {shot},  $R_\\mathrm{{tan}}$ = {rt['ti']:.2f} m "
+                                       f"($T_\\mathrm{{i}}$), {rt['vtor']:.2f} m ($v_\\mathrm{{tor}}$)"),
                            title_fontsize=small)
             ax.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(3))
         axc[0].tick_params(axis="x", labelbottom=False)
-        axc[1].set_xlabel(style.TIME_LABEL)
+        if nbi is not None:  # NBI power below the two traces, same time axis
+            axn = fig.add_subplot(sub[2], sharex=axc[0])
+            axn.plot(t[fr], nbi[fr], "-", color="0.3", lw=lw * 1.2)
+            axn.set_ylim(0, 1.15 * np.nanmax(nbi[fr]) if np.isfinite(nbi[fr]).any() else None)
+            axn.grid(False)  # a flat trace would hide behind a grid line
+            axn.locator_params(axis="y", nbins=2)
+            axn.set_ylabel(r"$P_\mathrm{NBI}$ (MW)", fontsize=small)
+            axn.set_xlabel(style.TIME_LABEL)
+            axc[1].tick_params(axis="x", labelbottom=False)
+        else:
+            axc[1].set_xlabel(style.TIME_LABEL)
         style.panel_letters([top_axes[0], top_axes[1], axc[0]], x=-0.18, y=1.16)
         return fig
 
@@ -874,8 +896,9 @@ def cmd_nstxu(args):
     """Transfer to NSTX-U: R2 of T_i (a) and v_tor (b) on the NSTX-U test set.
 
     Point plot with a broken y-axis as in the scaling panels: one column per model
-    (DIII-D model green, DIII-D+NSTX model blue, NSTX-U model red = the same
-    architecture trained from scratch on NSTX-U). Filled: trained on the NSTX-U
+    with a colour per model variant (style.COLORS): zero-shot DIII-D model green and
+    DIII-D+NSTX model red; trained on NSTX-U: DIII-D model fine-tuned pink, NSTX-U model
+    (the same architecture from scratch) brown, DIII-D+NSTX model fine-tuned dark gold. Filled: trained on the NSTX-U
     training discharges (fine-tuned, or from scratch for the NSTX-U model), mean +-
     std over the seeds (upper axis). Open: without NSTX-U data (zero-shot, one model,
     lower axis). Inputs are global_metrics outputs of the test-set dumps.
@@ -905,9 +928,9 @@ def cmd_nstxu(args):
     entries = [  # tick label, role, marker, runs
         ("DIII-D model", "zero_shot", "D", cols[0][3]),
         ("DIII-D+NSTX model", "finetuned", "o", cols[2][3]),
-        ("DIII-D model\nfine-tuned", "zero_shot", "D", cols[0][4]),
-        ("NSTX-U model", "scratch", "s", cols[1][4]),
-        ("DIII-D+NSTX model\nfine-tuned", "finetuned", "o", cols[2][4]),
+        ("DIII-D model\nfine-tuned", "nstxu_ft_d3d", "D", cols[0][4]),
+        ("NSTX-U model", "nstxu_scratch", "s", cols[1][4]),
+        ("DIII-D+NSTX model\nfine-tuned", "nstxu_ft_d3d_nstx", "o", cols[2][4]),
     ]
 
     def build(ctx):
@@ -923,7 +946,7 @@ def cmd_nstxu(args):
                 m, sd = stat(runs, t)
                 ax.errorbar([x], [m], yerr=[sd] if len(runs) > 1 else None, marker=mk,
                             ms=4 if paper else 7, color=style.COLORS[role],
-                            mfc="none" if role == "scratch" else None, **eb)
+                            mfc="none" if role == "nstxu_scratch" else None, **eb)
             ax.axvline(1.8, color="0.6", lw=0.8, ls=":")
             ax.set_xticks(xs)
             ax.set_xticklabels([e[0] for e in entries], rotation=45, ha="right",
@@ -1213,24 +1236,25 @@ def cmd_zeroshot(args):
         size = (PAPER_W, 5.4) if ctx == "paper" else (12, 10)
         fig, axes = plt.subplots(2, 2, figsize=size, layout="constrained",
                                  gridspec_kw={"height_ratios": [1.25, 1]})
+        maps = []
         for t, name in enumerate(TARGETS):
             ax = axes[0, t]
             small = "x-small" if ctx == "paper" else "small"
             *_, m = _draw_flaghist(ax, zs.y[..., t], zs.pred[..., t], classes[t],
                                    style.TARGET_SCALE[name], ctx == "paper", small,
                                    range_from_consistent=True, show_flagged=False,
-                                   cmap="viridis")
+                                   color=style.COLORS["zero_shot"], cmin=5, pct=(0.5, 99.5))
             ax.grid(False)
-            lbl = style.TARGET_LABEL[name]
-            ax.set_xlabel("conventional fit " + lbl)
-            ax.set_ylabel("predicted " + lbl)
+            xl, yl = style.target_rec_labels(name)
+            ax.set_xlabel(xl)
+            ax.set_ylabel(yl)
             unit = "keV" if name == "ti" else "km/s"
             r2, r2a, medae = stats[t]
             ax.text(0.04, 0.96, f"$R^2$ = {r2:.2f}\n"
                     f"median |error| = {medae:.2g} {unit}",
                     transform=ax.transAxes, va="top", ha="left", fontsize=small, zorder=6,
                     bbox=dict(boxstyle="round", fc="w", ec="0.7", alpha=0.9))
-            fig.colorbar(m, ax=ax, label="labels per bin", fraction=0.046, pad=0.03)
+            maps.append(m)
             ax = axes[1, t]
             rz, rf, rza, rfa = r2c[t]
             for r, role in ((rz, "zero_shot"), (rf, "finetuned")):
@@ -1248,6 +1272,10 @@ def cmd_zeroshot(args):
             ax.set_ylim(bottom, 1.0)
             ax.set_xlabel(style.RTAN_LABEL)
             ax.set_ylabel(f"$R^2$ per chord, {style.TARGET_SYMBOL[name]}")
+        vmax = max(mp.get_array().max() for mp in maps)
+        for mp in maps:
+            mp.set_clim(5, vmax)
+        fig.colorbar(maps[0], ax=list(axes[0]), fraction=0.03, pad=0.02)
         h, l_ = axes[1, 0].get_legend_handles_labels()
         fig.legend(h, l_, loc="outside lower center", ncol=2, frameon=False,
                    columnspacing=1.0,
@@ -1259,7 +1287,7 @@ def cmd_zeroshot(args):
 
 
 def _draw_flaghist(ax, y, p, cls, scale, paper, small, range_from_consistent=False,
-                   show_flagged=True, cmap=None):
+                   show_flagged=True, cmap=None, cmin=1, pct=(0.05, 99.95), color=None):
     """Prediction vs conventional fit: consistent labels as a grey 2D histogram (log
     colour), flagged labels (run edge, spike) as orange points below it.
 
@@ -1269,7 +1297,7 @@ def _draw_flaghist(ax, y, p, cls, scale, paper, small, range_from_consistent=Fal
 
     ok = np.isfinite(y) & np.isfinite(p) & (cls >= 0)
     yy, pp, fl = y[ok] * scale, p[ok] * scale, cls[ok] >= 1
-    lo, hi = np.percentile(yy[~fl] if range_from_consistent else np.r_[yy, pp], [0.05, 99.95])
+    lo, hi = np.percentile(yy[~fl] if range_from_consistent else np.r_[yy, pp], list(pct))
     pad = 0.05 * (hi - lo)
     lo, hi = lo - pad, hi + pad
     if lo > -pad and lo < 0.1 * hi:  # non-negative quantity (T_i): start at 0
@@ -1282,10 +1310,13 @@ def _draw_flaghist(ax, y, p, cls, scale, paper, small, range_from_consistent=Fal
     if show_flagged:
         ax.scatter(yy[fl], pp[fl], s=0.5 if paper else 2, color=CLASS_COLORS[1], alpha=0.35,
                    lw=0, rasterized=True, zorder=2)
-    if cmap is None:  # grey, so that the orange flagged points stand out
+    if color is not None:  # one colour, the count shown by the opacity
+        rgb = matplotlib.colors.to_rgb(color)
+        cmap = ListedColormap(np.c_[np.tile(rgb, (256, 1)), np.linspace(0.12, 1.0, 256)])
+    elif cmap is None:  # grey, so that the orange flagged points stand out
         cmap = ListedColormap(plt.get_cmap("Greys")(np.linspace(0.3, 1.0, 256)))
     *_, mappable = ax.hist2d(yy[~fl], pp[~fl], bins=[bins, bins], cmap=cmap, norm=LogNorm(),
-                             rasterized=True, zorder=3, cmin=1)
+                             rasterized=True, zorder=3, cmin=cmin)
     ax.plot([lo, hi], [lo, hi], "--", color="k", lw=0.8, alpha=0.8, zorder=4)
     ax.set_xlim(lo, hi)
     ax.set_ylim(lo, hi)
@@ -1317,8 +1348,8 @@ def cmd_flaghist(args):
                                layout="constrained")
         _draw_flaghist(ax, d.y[..., t], d.pred[..., t], cls, style.TARGET_SCALE[args.target],
                        paper, small)
-        ax.set_xlabel(f"fitted {sym} ({unit})")
-        ax.set_ylabel(f"predicted {sym} ({unit})")
+        ax.set_xlabel(style.target_rec_labels(args.target)[0])
+        ax.set_ylabel(style.target_rec_labels(args.target)[1])
         ax.legend(handles=[matplotlib.patches.Patch(color="0.45", label="consistent"),
                            Line2D([], [], ls="", marker="o", ms=4, color=CLASS_COLORS[1],
                                   label="flagged (run edge, spike)")],
@@ -1431,8 +1462,8 @@ def cmd_errclass(args):
         # a: predicted vs fitted v_tor, flagged labels on top
         sc = style.TARGET_SCALE["vtor"]
         _draw_flaghist(a, d.y[..., t], d.pred[..., t], cls_all, sc, paper, small)
-        a.set_xlabel(r"fitted $v_\mathrm{tor}$ (km/s)")
-        a.set_ylabel(r"predicted $v_\mathrm{tor}$ (km/s)")
+        a.set_xlabel(style.target_rec_labels("vtor")[0])
+        a.set_ylabel(style.target_rec_labels("vtor")[1])
         a.legend(handles=[matplotlib.patches.Patch(color="0.45", label="consistent"),
                           Line2D([], [], ls="", marker="o", ms=4, color=CLASS_COLORS[1],
                                  label="flagged (run edge, spike)")],
@@ -1815,7 +1846,9 @@ def main():
     s.add_argument("--trace-label2", default="NSTX (325 discharges) model")
     s.add_argument("--trace-shot", default=None)
     s.add_argument("--trace-chords", type=Path, required=True)
-    s.add_argument("--trace-x", type=float, default=1.10)
+    s.add_argument("--trace-x", type=float, default=1.10, help="R_tan of the v_tor trace chord (m)")
+    s.add_argument("--trace-x-ti", type=float, default=None,
+                   help="R_tan of the T_i trace chord (m); default: --trace-x")
     s.add_argument("--trace-t0", type=float, default=0.370)
     s.add_argument("--trace-t1", type=float, default=0.445)
     s.add_argument("--trace-t-offset", type=float, default=-0.235)
