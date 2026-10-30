@@ -1189,7 +1189,7 @@ def _r2_per_chord(d, t, consistent=False):
 def cmd_zeroshot(args):
     """Zero-shot transfer: predicted vs target (2D histograms) and R2 per chord.
 
-    Consistent labels only (cer_transfer.analysis.coverage.label_classes). a, b: DIII-D
+    All targets. a, b: DIII-D
     model on the NSTX test set (--zs), T_i and v_tor, 2D histogram (log colour), R2 and
     median error inset; c, d: R2 per chord vs R_tan, DIII-D model (zero-shot) and
     DIII-D+NSTX model (fine-tuned).
@@ -1201,30 +1201,21 @@ def cmd_zeroshot(args):
     zs = load_predictions(args.zs)
     ft = load_predictions(args.ft)
     x = _chord_x(args.chords, zs.C)
-    from cer_transfer.analysis.coverage import label_classes
-
     classes, stats, r2c = [], [], []
     for t, name in enumerate(TARGETS):
         s = style.TARGET_SCALE[name]
-        cls = label_classes(zs.y[..., t])
-        classes.append(cls)
+        classes.append(np.where(np.isfinite(zs.y[..., t]), 0, -1).astype(np.int8))  # all targets
         y, p = zs.y[..., t] * s, zs.pred[..., t] * s
         ok = np.isfinite(y) & np.isfinite(p)
-        cons = ok & (cls == 0)
-        r2, r2a = _r2(p[cons], y[cons]), _r2(p[ok], y[ok])
-        medae = float(np.median(np.abs(p - y)[cons]))
-        stats.append((r2, r2a, medae))
+        r2 = _r2(p[ok], y[ok])
+        medae = float(np.median(np.abs(p - y)[ok]))
+        stats.append((r2, r2, medae))
         unit = "keV" if name == "ti" else "km/s"
-        print(f"zero-shot {name}: R2 consistent labels {r2:.3f}, all labels {r2a:.3f}; median "
-              f"|error| consistent {medae:.3g} {unit}, all {np.median(np.abs(p - y)[ok]):.3g} "
-              f"(n={ok.sum()}, consistent {100 * cons.sum() / ok.sum():.1f}%)")
-        rz, rf = _r2_per_chord(zs, t, True), _r2_per_chord(ft, t, True)
-        rza, rfa = _r2_per_chord(zs, t), _r2_per_chord(ft, t)
-        r2c.append((rz, rf, rza, rfa))
-        print(f"  R2 per chord (zero-shot / fine-tuned) median over chords: consistent labels "
-              f"{np.nanmedian(rz):.3f} / {np.nanmedian(rf):.3f}, all labels "
-              f"{np.nanmedian(rza):.3f} / {np.nanmedian(rfa):.3f}; fine-tuned R2 "
-              f"{_r2(ft.pred[..., t].ravel(), ft.y[..., t].ravel()):.3f}")
+        print(f"zero-shot {name}: R2 all targets {r2:.3f}; median |error| {medae:.3g} {unit} (n={ok.sum()})")
+        rz, rf = _r2_per_chord(zs, t), _r2_per_chord(ft, t)
+        r2c.append((rz, rf, rz, rf))
+        for xx, a_, b_ in zip(x[np.argsort(x)], rz[np.argsort(x)], rf[np.argsort(x)]):
+            print(f"  R_tan {xx:.2f}: R2 zero-shot {a_:.2f}, fine-tuned {b_:.2f}")
     order = np.argsort(x)
     order = order[np.isfinite(x[order])]
     # one R2 range for both targets (comparable panels c, d)
@@ -1360,165 +1351,119 @@ def cmd_flaghist(args):
     _render(build, args.out, args.out_name or f"pred_vs_fit_flagged_{args.target}")
 
 
-def _abserr(d, x, core_max, edge_min):
-    """Median |pred - y| and median sigma_fit per chord and target (canonical units).
+def _abserr(d, x, core_max, edge_min, file_id):
+    """Median |pred - y| per chord and target (canonical units) with two noise references.
 
-    Prints core/edge summaries; returns {target: (median |error|, median sigma_fit)}.
+    scatter: the median change |y_t - y_{t-1}| between consecutive fits of one discharge
+    (fit noise plus the real evolution of the plasma over one fit period).
+    quoted: 0.674 * median sigma_fit, the median |noise| if the quoted sigma were right.
+    file_id: (T,) discharge index of every frame of the dump (triples never cross files).
+    Returns {target: (median |error|, scatter, quoted)}.
     """
     out = {}
     for t, name in enumerate(TARGETS):
         y, p, sg = (a[..., t].astype(np.float64) for a in (d.y, d.pred, d.sigma))
-        ok = np.isfinite(y) & np.isfinite(p) & np.isfinite(sg)
-        e = np.where(ok, np.abs(p - y), np.nan)
-        s_ = np.where(ok, sg, np.nan)
-        me = np.array([np.nanmedian(e[c]) if ok[c].any() else np.nan for c in range(d.C)])
-        ms = np.array([np.nanmedian(s_[c]) if ok[c].any() else np.nan for c in range(d.C)])
-        out[name] = (me, ms)
+        me, sc, qs = (np.full(d.C, np.nan) for _ in range(3))
+        for c in range(d.C):
+            idx = np.where(np.isfinite(y[c]) & np.isfinite(p[c]))[0]
+            if idx.size < 3:
+                continue
+            me[c] = np.median(np.abs(p[c, idx] - y[c, idx]))
+            qs[c] = 0.674 * np.nanmedian(sg[c, idx])
+            g = np.diff(idx)
+            m = (g <= 2) & (file_id[idx[:-1]] == file_id[idx[1:]])
+            if m.sum() >= 100:  # too few consecutive pairs: no reference drawn
+                sc[c] = np.median(np.abs(y[c, idx[1:][m]] - y[c, idx[:-1][m]]))
+        out[name] = (me, sc, qs)
         unit = "eV" if name == "ti" else "km/s"
-        for reg, sel in ((f"core (R_tan < {core_max:g} m)", x < core_max),
-                         (f"edge (R_tan > {edge_min:g} m)", x > edge_min)):
-            print(f"{name} {reg}: median |error| {np.median(e[sel][ok[sel]]):.3g} {unit}, "
-                  f"median sigma_fit {np.median(s_[sel][ok[sel]]):.3g} {unit}")
+        for reg, sel in (("core", x < core_max), ("between", (x >= core_max) & (x <= edge_min)),
+                         ("edge", x > edge_min)):
+            r = me[sel] / sc[sel]
+            print(f"{name} {reg}: median |error| / median change between consecutive fits per chord {np.nanmin(r):.2f}-{np.nanmax(r):.2f}, "
+                  f"median |error| / quoted {np.nanmin(me[sel] / qs[sel]):.2f}-{np.nanmax(me[sel] / qs[sel]):.2f} ({unit})")
     return out
 
 
 def cmd_errclass(args):
-    """Where the error lives (fine-tuned model on the validation set).
+    """Accuracy against the fits' own uncertainty (fine-tuned model, all targets).
 
-    a: predicted vs fitted v_tor, consistent labels as a grey 2D histogram, flagged
-    labels (run edge + spike, cer_transfer.analysis.coverage.label_classes, pooled
-    per chord as in the Methods) as orange points. b: a v_tor trace with flagged
-    labels marked. c, d: median |error| per chord vs R_tan with the median
-    sigma_fit, T_i (eV) and v_tor (km/s).
+    a, b: median |error| per chord vs R_tan with the median change between consecutive fits,
+    T_i (eV) and v_tor (km/s). c: share of the squared error carried by the largest errors (all
+    targets ranked by |error|), both targets: the RMSE is set by few large
+    disagreements, the median error by the bulk.
     """
-    from types import SimpleNamespace
-
-    from cer_transfer.analysis.coverage import label_classes
-    from cer_transfer.figures.common import frame_times, load_predictions
-    from cer_transfer.figures.timeaxis import file_times
+    from cer_transfer.figures.common import load_predictions
 
     d = load_predictions(args.preds)
-    t = 1  # v_tor
-    # label classes pooled over the dump, per chord (the Methods definition)
-    cls_all = label_classes(d.y[..., t])
-    if args.trace:  # a separate single-discharge dump
-        tr = load_predictions(args.trace)
-        ctr = label_classes(tr.y[..., t])
-    else:  # cut the trace discharge out of --preds, keeping the pooled classes
-        L = np.load(args.file_lengths)
-        files, Ts = list(L["files"]), L["T"]
-        if Ts.sum() != d.T:
-            raise SystemExit(f"--file-lengths cover {Ts.sum()} frames, the dump has {d.T}")
-        fi = next((i for i, f in enumerate(files) if Path(f).name == Path(args.trace_shot).name),
-                  None)
-        if fi is None:
-            raise SystemExit(f"{args.trace_shot} not in --file-lengths")
-        s0, T = int(Ts[:fi].sum()), int(Ts[fi])
-        tr = SimpleNamespace(C=d.C, T=T, **{k: getattr(d, k)[:, s0:s0 + T]
-                                            for k in ("y", "pred", "sigma", "pred_sigma")})
-        ctr = cls_all[:, s0:s0 + T]
-    ytr = tr.y[..., t]
-    tt = (file_times(args.trace_shot, tr.T, 200.0, args.t_offset) if args.trace_shot
-          else frame_times(tr.T, t_offset=args.t_offset))
-    nW = int(round(args.window * 200.0))
-    pick = None
-    chords = [args.chord] if args.chord is not None else range(tr.C)
-    for c in chords:
-        starts = ([int(np.argmin(np.abs(tt - args.t0)))] if args.t0 is not None
-                  else np.where(ctr[c] >= 0)[0])
-        for i0 in starts:
-            w = ctr[c, i0:i0 + nW]
-            if (w == 1).any() and (w == 2).any() and (w == 0).sum() >= 4:
-                pick = (c, i0)
-                break
-        if pick:
-            break
-    if pick is None:
-        raise SystemExit("no window with a spike and a run-edge label; set --chord/--t0")
-    c, i0 = pick
-    sl = slice(i0, min(i0 + nW, tr.T))
     x = _chord_x(args.chords, d.C)
-    ae = _abserr(d, x, args.core_max, args.edge_min)
-    xtr = _chord_x(args.trace_chords, tr.C) if args.trace_chords else None
-    w = ctr[c, sl]
-    zc = (np.abs(tr.pred[c, sl, t] - ytr[c, sl]) / tr.sigma[c, sl, t])[w == 0]
-    print(f"trace: {args.trace or args.trace_shot}, chord {c}, window {tt[sl][0]:.3f}-{tt[sl][-1]:.3f} s "
-          f"(spikes {int((w == 2).sum())}, run edges {int((w == 1).sum())}; unflagged "
-          f"labels: max |error|/sigma_fit {np.nanmax(zc):.2f}; model band max "
-          f"{np.nanmax(tr.pred_sigma[c, sl, t]) * args.k:.1f} km/s)")
+    Ts = np.load(args.file_lengths)["T"]
+    if Ts.sum() != d.T:
+        raise SystemExit(f"--file-lengths cover {Ts.sum()} frames, the dump has {d.T}")
+    ae = _abserr(d, x, args.core_max, args.edge_min, np.repeat(np.arange(Ts.size), Ts))
+    order = np.argsort(x)
+    order = order[np.isfinite(x[order])]
+    # cumulative share of the squared error, largest errors first
+    frac = np.logspace(-4, 0, 200)
+    share = {}
+    for t, name in enumerate(TARGETS):
+        y, p = d.y[..., t].astype(np.float64), d.pred[..., t].astype(np.float64)
+        ok = np.isfinite(y) & np.isfinite(p)
+        e2 = np.sort(((p - y) ** 2)[ok])[::-1]
+        c = np.cumsum(e2) / e2.sum()
+        share[name] = c[np.clip((frac * e2.size).astype(int) - 1, 0, e2.size - 1)]
+        print(f"{name}: largest 1% of the errors carry {100 * c[int(0.01 * e2.size) - 1]:.1f}% "
+              f"of the squared error (n={e2.size})")
 
     def build(ctx):
         """Draw the figure for the current plotting context."""
         paper = ctx == "paper"
         small = "x-small" if paper else "small"
-        size = (PAPER_W, 3.0) if paper else (20, 7.0)
-        fig = plt.figure(figsize=size, layout="constrained")
-        gs = fig.add_gridspec(1, 3, width_ratios=[1, 1.1, 1])
-        a = fig.add_subplot(gs[0])
-        b = fig.add_subplot(gs[1])
-        gc = gs[2].subgridspec(2, 1)
-        cx = fig.add_subplot(gc[0])
-        dx = fig.add_subplot(gc[1], sharex=cx)
-        # a: predicted vs fitted v_tor, flagged labels on top
-        sc = style.TARGET_SCALE["vtor"]
-        _draw_flaghist(a, d.y[..., t], d.pred[..., t], cls_all, sc, paper, small)
-        a.set_xlabel(style.target_rec_labels("vtor")[0])
-        a.set_ylabel(style.target_rec_labels("vtor")[1])
-        a.legend(handles=[matplotlib.patches.Patch(color="0.45", label="consistent"),
-                          Line2D([], [], ls="", marker="o", ms=4, color=CLASS_COLORS[1],
-                                 label="flagged (run edge, spike)")],
-                 fontsize=small, loc="upper left", frameon=True, framealpha=0.9,
-                 handlelength=1.0)
-        # b: trace with flagged labels (fit markers on top of the flag symbols)
-        s = style.TARGET_SCALE["vtor"]
-        tw = tt[sl]
-        mu, sg = tr.pred[c, sl, t] * s, tr.pred_sigma[c, sl, t] * s * args.k
-        ok = np.isfinite(mu)
-        style.model_line(b, tw[ok], mu[ok], sg[ok], role="finetuned", marker="", lw=1.4)
-        yy, ee, cc = ytr[c, sl] * s, tr.sigma[c, sl, t] * s, ctr[c, sl]
-        m = cc >= 0
-        style.fit_points(b, tw[m], yy[m], ee[m])
-        for k in (1, 2):
-            mk = cc == k
-            b.plot(tw[mk], yy[mk], CLASS_MARKERS[k], ms=13 if not paper else 7,
-                   mfc="none", mec=CLASS_COLORS[k], mew=1.5, zorder=4,
-                   label=f"flagged: {CLASS_NAMES[k]}")
-        b.set_xlabel(style.TIME_LABEL)
-        b.set_ylabel(style.VTOR_LABEL)
-        b.xaxis.set_major_locator(matplotlib.ticker.MaxNLocator(4))
-        rt = (f"$R_\\mathrm{{tan}}$ = {xtr[c]:.2f} m" if xtr is not None and np.isfinite(xtr[c])
-              else f"chord {c}")
-        shot = re.search(r"(\d{6})", str(args.trace_shot or args.trace))
-        b.text(0.97, 0.03, (f"discharge {shot.group(1)}\n" if shot else "") + rt,
-               transform=b.transAxes, ha="right", va="bottom", fontsize=small)
-        style.ordered_legend(b, fontsize=small, loc="upper center",
-                             bbox_to_anchor=(0.5, -0.22), ncol=2, frameon=False,
-                             columnspacing=0.8, handlelength=1.5)
-        # c, d: median |error| and median sigma_fit vs R_tan
-        order = np.argsort(x)
-        order = order[np.isfinite(x[order])]
+        size = (PAPER_W, 2.6) if paper else (20, 6.6)
+        fig, axes = plt.subplots(1, 3, figsize=size, layout="constrained")
         col = style.COLORS["finetuned"]
-        for ax, name, unit in ((cx, "ti", "eV"), (dx, "vtor", "km/s")):
-            me, ms = ae[name]
-            ax.plot(x[order], me[order], "o-", color=col, ms=2.5 if paper else 4, lw=1.2,
-                    label="median $|$error$|$")
-            ax.plot(x[order], ms[order], "-", color="0.55", lw=1.4, label=r"median $\sigma_\mathrm{fit}$")
+        for ax, name, unit in ((axes[0], "ti", "eV"), (axes[1], "vtor", "km/s")):
+            me, sc, qs = ae[name]
+            # linear axis; its top covers the chords inside --clip-r, the outermost chords
+            # above it are drawn on the top edge as up-triangles
+            xo, mo, so = x[order], me[order], sc[order]
+            inner = xo <= args.clip_r
+            top = 1.15 * np.nanmax(np.r_[mo[inner], so[inner]])
+            for v, kw in ((mo, dict(fmt="o-", color=col, ms=2.5 if paper else 4, lw=1.2,
+                                    label="reconstruction vs. target")),
+                          (so, dict(fmt="-", color="k", lw=1.4,
+                                    label="target change between consecutive frames"))):
+                fmt = kw.pop("fmt")
+                ax.plot(xo, np.minimum(v, top), fmt, clip_on=False, **kw)
+                hi = v > top
+                if hi.any():
+                    ax.plot(xo[hi], np.full(hi.sum(), top), "^", ms=4 if paper else 6,
+                            color=kw["color"], clip_on=False, zorder=5)
             ax.axvspan(args.core_max, args.edge_min, color="0.92", lw=0, zorder=0)
-            ax.set_yscale("log")  # the outermost chords reach 10x the core values
-            ax.yaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
-            ax.set_ylabel(f"{style.TARGET_SYMBOL[name]} ({unit})")
-        tf = cx.get_xaxis_transform()
-        kw = dict(transform=tf, va="top", fontsize=small, color="0.35")
-        cx.text(args.core_max - 0.01, 0.97, "core", ha="right", **kw)
-        cx.text(args.edge_min + 0.01, 0.97, "edge", ha="left", **kw)
-        cx.annotate("not assigned", (0.5 * (args.core_max + args.edge_min), 1.0), xycoords=tf,
-                    xytext=(0, 2), textcoords="offset points", ha="center", va="bottom",
-                    fontsize="xx-small" if paper else "x-small", color="0.45")
-        plt.setp(cx.get_xticklabels(), visible=False)
-        dx.set_xlabel(style.RTAN_LABEL)
-        dx.legend(fontsize=small, loc="upper center", bbox_to_anchor=(0.5, -0.42), ncol=1,
-                  frameon=False, handlelength=1.5)
-        style.panel_letters([a, b, cx, dx], x=-0.14)
+            ax.set_ylim(0, top)
+            ax.set_ylabel(f"median $|$deviation$|$, {style.TARGET_SYMBOL[name]} ({unit})")
+            ax.set_xlabel(style.RTAN_LABEL)
+            tf = ax.get_xaxis_transform()
+            kw = dict(transform=tf, va="top", fontsize=small, color="0.35")
+            ax.text(args.core_max - 0.01, 0.97, "core", ha="right", **kw)
+            ax.text(args.edge_min + 0.01, 0.97, "edge", ha="left", **kw)
+        h, l_ = axes[0].get_legend_handles_labels()
+        fig.legend(h, l_, loc="outside lower left", ncol=2, frameon=False, fontsize=small,
+                   handlelength=1.8, columnspacing=1.2)
+        ax = axes[2]
+        for name, ls in (("ti", "-"), ("vtor", "--")):
+            ax.plot(100 * frac, 100 * share[name], ls, color=col, lw=1.4,
+                    label=style.TARGET_SYMBOL[name])
+        ax.axvline(1.0, color="0.55", lw=0.8, ls=":")
+        ax.set_xscale("log")
+        ax.xaxis.set_major_formatter(matplotlib.ticker.FuncFormatter(lambda v, _: f"{v:g}"))
+        ax.set_ylim(0, 100)
+        ax.set_xlim(100 * frac[0], 100)
+        ax.set_xlabel(r"largest errors (% of targets)")
+        ax.set_ylabel(r"share of squared error (%)")
+        ax.legend(fontsize=small, loc="lower right", frameon=False, handlelength=1.8)
+        for ax, s in zip(axes, "abc"):  # above the top-left corner, clear of the neighbour
+            ax.text(0.0, 1.02, s, transform=ax.transAxes, fontweight="bold", va="bottom",
+                    ha="left")
         return fig
 
     _render(build, args.out, args.out_name)
@@ -1600,11 +1545,10 @@ def cmd_reliability(args):
     """Reliability diagram: empirical vs nominal coverage of +-z sigma_hat.
 
     sigma_hat = sqrt((k * sigma_model)^2 + sigma_label^2) as in
-    cer_transfer.analysis.coverage; consistent labels only.
+    cer_transfer.analysis.coverage; all targets.
     """
     from scipy.special import erf
 
-    from cer_transfer.analysis.coverage import consistent_mask
     from cer_transfer.figures.common import load_predictions
 
     d = load_predictions(args.preds)
@@ -1618,7 +1562,7 @@ def cmd_reliability(args):
         y, mu = d.y[..., t].astype(np.float64), d.pred[..., t].astype(np.float64)
         s = np.sqrt((args.k[t] * d.pred_sigma[..., t]) ** 2
                     + np.nan_to_num(d.sigma[..., t]) ** 2)
-        cons = consistent_mask(y) & np.isfinite(mu)
+        cons = np.isfinite(y) & np.isfinite(mu)
         z = np.abs(y - mu) / s
         for reg, sel in regions:
             zz = np.sort(z[sel][cons[sel]])
@@ -1965,24 +1909,15 @@ def main():
     fh.add_argument("--out", type=Path, default=Path("figs"))
     fh.add_argument("--out-name", default=None)
     fh.set_defaults(fn=cmd_flaghist)
-    ec = sub.add_parser("errclass", help="v_tor error by label class + flagged trace")
-    ec.add_argument("--preds", required=True, help="fine-tuned validation dump")
-    ec.add_argument("--trace", default=None,
-                    help="single-discharge dump (default: cut --trace-shot out of --preds)")
-    ec.add_argument("--t-offset", type=float, default=-0.235,
-                    help="time of frame 0 (s); frames at 200 Hz")
-    ec.add_argument("--window", type=float, default=0.15, help="trace window (s)")
-    ec.add_argument("--chord", type=int, default=None, help="trace chord (default: auto)")
-    ec.add_argument("--t0", type=float, default=None, help="window start (s; default auto)")
-    ec.add_argument("--k", type=float, default=1.0,
-                    help="calibration factor of the v_tor model sigma (band)")
+    ec = sub.add_parser("errclass", help="median error vs sigma_fit per chord, squared-error share")
+    ec.add_argument("--preds", required=True, help="fine-tuned test dump")
     ec.add_argument("--chords", required=True, help="chord,x CSV (R_tan in m) of --preds")
-    ec.add_argument("--trace-chords", default=None, help="chord,x CSV of the trace discharge")
-    ec.add_argument("--trace-shot", default=None, help="discharge file of the trace (time axis)")
-    ec.add_argument("--file-lengths", default=None,
-                    help="npz with T = frames per file of --preds (label classes per file)")
+    ec.add_argument("--file-lengths", default="gallery/test_file_lengths.npz",
+                    help="frames per discharge of --preds (npz with T)")
     ec.add_argument("--core-max", type=float, default=1.2, help="core: R_tan below (m)")
     ec.add_argument("--edge-min", type=float, default=1.3, help="edge: R_tan above (m)")
+    ec.add_argument("--clip-r", type=float, default=1.5,
+                    help="y axis covers the chords with R_tan up to this (m); outer ones clipped")
     ec.add_argument("--out", type=Path, default=Path("figs"))
     ec.add_argument("--out-name", default="error_decomposition")
     ec.set_defaults(fn=cmd_errclass)

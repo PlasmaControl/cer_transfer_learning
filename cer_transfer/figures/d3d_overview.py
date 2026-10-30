@@ -227,7 +227,6 @@ def main():
     p.add_argument("--cmin", type=int, default=5, help="histogram: hide bins with fewer labels")
     p.add_argument("--out", type=Path, default=Path("figs"))
     p.add_argument("--out-name", default="d3d_overview")
-    p.add_argument("--with-vtor", action="store_true", help="also v_tor traces and profiles (taller)")
     args = p.parse_args()
 
     d = load_predictions(args.preds)
@@ -311,13 +310,15 @@ def main():
             paper = ctx == "paper"
             small = "x-small" if paper else "small"
             ms, lw = (2.0, 1.0) if paper else (3.5, 1.6)
-            vt = args.with_vtor
-            fig = plt.figure(figsize=(PAPER_W, 7.8 if vt else 4.6) if paper else (19, 18 if vt else 11),
-                             layout="constrained")
-            gs = fig.add_gridspec(2, 1, height_ratios=[1, 2.4 if vt else 1.25])
-            top = gs[0].subgridspec(1, 3, width_ratios=[1, 1, 1.1])
-            axa = [fig.add_subplot(top[0, j]) for j in range(2)]
-            axc = fig.add_subplot(top[0, 2])
+            # columns: (a, b, c) summary | T_i traces (d, e, f) | T_i profiles; one row per discharge
+            fig = plt.figure(figsize=(PAPER_W, 5.4) if paper else (19, 14), layout="constrained")
+            fig.get_layout_engine().set(h_pad=0.01, w_pad=0.01, hspace=0.0, wspace=0.0)
+            gs = fig.add_gridspec(3, 3, width_ratios=[1.2, 1.45, 1])
+            # (a, b) and their shared colour bar, which spans both rows; empty middle column: gap
+            ab = gs[0:2, 0].subgridspec(2, 3, width_ratios=[1, 0.16, 0.05])
+            axa = [fig.add_subplot(ab[j, 0]) for j in range(2)]
+            cax = fig.add_subplot(ab[:, 2])
+            axc = fig.add_subplot(gs[2, 0])
             maps = []
             for ax, name, t in zip(axa, TARGETS, (0, 1)):
                 *_, m = _draw_flaghist(ax, d.y[..., t], d.pred[..., t], cls[t], style.TARGET_SCALE[name],
@@ -328,15 +329,16 @@ def main():
                 ax.set_xlabel(xl)
                 ax.set_ylabel(yl)
                 r2, med = stats[name]
-                ax.text(0.04, 0.96, f"$R^2$ = {r2:.2f}\nmedian |error| = {med:.2g} "
+                ax.text(0.03, 0.97, f"$R^2$ = {r2:.2f}\nmedian |error| = {med:.2g} "
                         f"{'keV' if name == 'ti' else 'km/s'}", transform=ax.transAxes, va="top",
-                        ha="left", fontsize="xx-small" if paper else "x-small", zorder=6,
+                        ha="left", fontsize=5 if paper else "x-small", zorder=6,
                         bbox=dict(boxstyle="round", fc="w", ec="0.7", alpha=0.9))
                 maps.append(m)
             vmax = max(mp.get_array().max() for mp in maps)
             for mp in maps:
                 mp.set_clim(args.cmin, vmax)
-            fig.colorbar(maps[0], ax=axa, fraction=0.03, pad=0.02)
+            for ax in axa:
+                ax.set_anchor("E")  # square panels next to the colour bar
             col = style.COLORS["zero_shot"]
             ch = xr
             bottom = -0.5
@@ -356,40 +358,37 @@ def main():
             axc.set_ylabel("$R^2$ per chord")
             axc.legend(fontsize=small, loc="lower left")
 
-            # rows: [v_tor trace,] T_i trace, [v_tor profile,] T_i profile
-            rows_def = (["vtr", "ttr", "vpr", "tpr"] if vt else ["ttr", "tpr"])
-            bot = gs[1].subgridspec(len(rows_def), 3, height_ratios=[1, 1, 0.95, 0.95] if vt else [1, 0.95])
+            # traces share the time axis, profiles the R axis; tick labels on the bottom row only
             letters_axes = axa + [axc]
+            trs, prs, tspan = [], [], []
+            ti_sc = style.TARGET_SCALE["ti"]
             for j, ((lab, shot, f, has_ti), (c, a, b, on, ev, ip)) in enumerate(zip(cols, picks)):
                 tm = ip / FS
-                ax = {key: fig.add_subplot(bot[q, j]) for q, key in enumerate(rows_def)}
-                for key, t, sc in (("ttr", 0, style.TARGET_SCALE["ti"]), ("vtr", 1, 1.0)):
-                    if key in ax:
-                        draw_trace(ax[key], f, c, t, sc, a, b, ms, lw, on, tm)
-                        ax[key].set_ylabel(style.TARGET_LABEL[TARGETS[t]])
-                for key, t, sc in (("tpr", 0, style.TARGET_SCALE["ti"]), ("vpr", 1, 1.0)):
-                    if key in ax:
-                        draw_profile(ax[key], f, ev, xr, ip, t, sc, ms, lw)
-                        ax[key].set_ylabel(style.TARGET_LABEL[TARGETS[t]])
-                first = ax[rows_def[0]]
-                first.set_title(f"discharge {shot}, $R$ = {xr[c]:.2f} m", fontsize=small, loc="left", pad=3)
-                ax["ttr"].set_xlabel(style.TIME_LABEL)
-                ax["tpr"].set_xlabel("$R$ (m)")
-                if vt:
-                    ax["vtr"].sharex(ax["ttr"])
-                    plt.setp(ax["vtr"].get_xticklabels(), visible=False)
-                    ax["vpr"].sharex(ax["tpr"])
-                    plt.setp(ax["vpr"].get_xticklabels(), visible=False)
-                # profile label in the style of the trace label, same position
-                ax[rows_def[len(rows_def) // 2]].set_title(f"discharge {shot}, $t$ = {tm:.2f} s",
-                                                           fontsize=small, loc="left", pad=3)
-                letters_axes.append(first)
+                tr = fig.add_subplot(gs[j, 1], sharex=trs[0] if trs else None)
+                pr = fig.add_subplot(gs[j, 2], sharex=prs[0] if prs else None)
+                draw_trace(tr, f, c, 0, ti_sc, a, b, ms, lw, on, tm)
+                draw_profile(pr, f, ev, xr, ip, 0, ti_sc, ms, lw)
+                tspan += [a / FS, b / FS]
+                for axx in (tr, pr):
+                    axx.set_ylabel(style.TARGET_LABEL["ti"])
+                tr.set_title(f"discharge {shot}, $R$ = {xr[c]:.2f} m", fontsize=small, loc="left", pad=3)
+                pr.set_title(f"$t$ = {tm:.2f} s", fontsize=small, loc="left", pad=3)
+                if j < len(cols) - 1:
+                    plt.setp(tr.get_xticklabels() + pr.get_xticklabels(), visible=False)
+                trs.append(tr)
+                prs.append(pr)
+            trs[0].set_xlim(min(tspan), max(tspan))
+            trs[-1].set_xlabel(style.TIME_LABEL)
+            prs[-1].set_xlabel("$R$ (m)")
+            letters_axes += trs
             style.panel_letters(letters_axes, x=-0.14, y=1.06)
             hh = [Line2D([], [], color=style.COLORS["fit"], marker="o", ls="", ms=4),
                   Line2D([], [], color=style.COLORS["zero_shot"], lw=1.5),
                   Line2D([], [], color="0.35", lw=0.9, ls="--")]
             fig.legend(hh, [style.NAMES["fit"], "DIII-D model", "profile time"],
                        loc="outside lower center", ncol=3, frameon=False, fontsize=small)
+            cb = fig.colorbar(maps[0], cax=cax)
+            cb.ax.tick_params(labelsize="xx-small" if paper else "x-small", length=2, pad=1)
             fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches=bbox(ext))
             plt.close(fig)
     print(f"wrote {args.out}/{args.out_name}.png/.pdf")

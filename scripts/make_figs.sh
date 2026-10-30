@@ -189,15 +189,10 @@ CH=$R/chords_Rtan_137711.csv
 # zero-shot transfer figure: NSTX TEST set (zero-shot test dump of make_paper.sh section 2, fine-tuned test dump)
 ZS_TEST=${ZS_TEST:-gallery/zs_$(basename "$BO_CK" .pt)${BO_RO:+_$(basename "$BO_RO" .npz)}_test.npz}
 have $ZS_TEST $FT_TEST $CH && $RUN -m cer_transfer.figures.plots zeroshot --zs $ZS_TEST --ft $FT_TEST --chords $CH --out figs --out-name zero_shot_decomposition
-# where the error lives (NSTX TEST set): (a) predicted vs fitted v_tor, flagged labels in orange;
-# (b) v_tor trace of test discharge 124794 (cut out of the test dump; pooled label classes);
-# (c, d) median |error| and sigma_fit vs R_tan. SM: the T_i version of (a).
-have $FT_TEST gallery/test_file_lengths.npz $CH $R/chords_Rtan_124794.csv && \
-$RUN -m cer_transfer.figures.plots errclass --preds $FT_TEST --file-lengths gallery/test_file_lengths.npz \
-    --trace-shot $(shotany 124794) --trace-chords $R/chords_Rtan_124794.csv \
-    --chord 10 --t0 0.0955 --window 0.23 --chords $CH ${KVT:+--k ${KVT%,}} --t-offset $OFF \
-    --out figs --out-name error_decomposition
-have $FT_TEST && $RUN -m cer_transfer.figures.plots flaghist --preds $FT_TEST --target ti --out figs
+# accuracy against the fits' own uncertainty (NSTX TEST set, all targets): (a, b) median
+# |error| and sigma_fit vs R_tan; (c) share of the squared error carried by the largest errors
+have $FT_TEST $CH && \
+$RUN -m cer_transfer.figures.plots errclass --preds $FT_TEST --chords $CH --file-lengths gallery/test_file_lengths.npz --out figs --out-name error_decomposition
 have $FT_TEST $CH && $RUN -m cer_transfer.figures.plots reliability --preds $FT_TEST $K --chords $CH --out figs --out-name calibration_reliability
 # transfer to NSTX-U: zero-shot (make_paper.sh 2b) and trained on 325 NSTX-U discharges, 5 seeds
 # each (slurm/finetune_nstxu.sbatch SEED=1..5)

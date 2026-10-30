@@ -57,7 +57,10 @@ LS_LAB, LS_UNL = "--", ":"  # fitted / no-fit profile time
 def panel_label(ax, letter, text=None, **kw):
     """Bold panel letter, then the panel's identifier in normal weight."""
     s = rf"$\mathbf{{{letter}}}$" + (f"  {text}" if text else "")
-    ax.text(0.0, 1.02, s, transform=ax.transAxes, ha="left", va="bottom", **kw)
+    # kept out of the layout: a label wider than its panel would otherwise push the columns
+    # apart; an empty title reserves its height above the panel instead
+    ax.text(0.0, 1.02, s, transform=ax.transAxes, ha="left", va="bottom", **kw).set_in_layout(False)
+    ax.set_title(r"$R_\mathrm{tan}$", loc="left", pad=5, color="none", fontsize="large")
 
 
 def model_roles(label1, label2):
@@ -461,7 +464,7 @@ def main():
             else:
                 size = (18, 5.2) if args.vtor_only else (18, 9 + (1.2 if nbi is not None else 0))
             fig = plt.figure(figsize=size, layout="constrained")
-            fig.get_layout_engine().set(w_pad=0.03, h_pad=0.03, wspace=0.04, hspace=0.06, rect=(0, 0, 0.985, 1))
+            fig.get_layout_engine().set(w_pad=0.01 if ctx == "paper" else 0.06, h_pad=0.01, wspace=0.0, hspace=0.02)
             has_nbi = nbi is not None
             gs = fig.add_gridspec(nr + int(has_nbi), ncols, width_ratios=wr,
                                   height_ratios=[1] * nr + ([0.3] if has_nbi else []))
@@ -471,9 +474,8 @@ def main():
             for r, cells in enumerate(rows):
                 for cix, (kind, cc, k) in enumerate(cells):
                     share = first_col_ax.get(cix)
-                    # last-row profile reaches into the NBI row: its R axis sits at the bottom
-                    cell = gs[r:, cix] if (has_nbi and kind == "prof" and r == nr - 1) else gs[r, cix]
-                    ax = fig.add_subplot(cell, sharex=share)
+                    # every panel of a row has the same height; the NBI row stays empty under the profiles
+                    ax = fig.add_subplot(gs[r, cix], sharex=share)
                     first_col_ax.setdefault(cix, ax)
                     axes[r, cix] = ax
                     if kind == "spec":
@@ -499,6 +501,8 @@ def main():
                     last = r == nr - 1 and not (has_nbi and kind != "prof")
                     if last or (r == nr - 1 and kind == "prof"):
                         ax.set_xlabel(xlab if kind == "prof" else style.TIME_LABEL)
+                        if has_nbi and kind == "prof":  # R axis hangs into the empty NBI cell
+                            ax.xaxis.set_in_layout(False)
                     else:
                         plt.setp(ax.get_xticklabels(), visible=False)
 
