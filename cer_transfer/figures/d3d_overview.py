@@ -386,7 +386,7 @@ def main():
                   Line2D([], [], color=style.COLORS["zero_shot"], lw=1.5),
                   Line2D([], [], color="0.35", lw=0.9, ls="--")]
             fig.legend(hh, [style.NAMES["fit"], "DIII-D model", "profile time"],
-                       loc="outside lower center", ncol=3, frameon=False, fontsize=small)
+                       loc="outside upper center", ncol=3, frameon=False, fontsize=small)
             cb = fig.colorbar(maps[0], cax=cax)
             cb.ax.tick_params(labelsize="xx-small" if paper else "x-small", length=2, pad=1)
             fig.savefig(args.out / f"{args.out_name}.{ext}", dpi=300, bbox_inches=bbox(ext))

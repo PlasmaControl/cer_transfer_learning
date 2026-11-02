@@ -356,7 +356,7 @@ def cmd_curves(args):
         if args.ylim:
             ax.set_ylim(*args.ylim)
         if ft:
-            style.ordered_legend(ax, loc="upper center", bbox_to_anchor=(0.5, -0.2),
+            style.ordered_legend(ax, loc="lower center", bbox_to_anchor=(0.5, 1.02),
                                  ncol=2, fontsize="small" if ctx == "paper" else "x-small")
         else:
             style.ordered_legend(ax, loc="lower right", fontsize="small")
@@ -852,11 +852,11 @@ def cmd_scaling_targets(args):
             lo_, hi_ = np.nanmin(np.r_[yy[ok], *(m_[c, fr, j] * sc for _, m_, _, _ in models)]), \
                 np.nanmax(np.r_[yy[ok], *(m_[c, fr, j] * sc for _, m_, _, _ in models)])
             ax.set_ylim(lo_ - 0.1 * (hi_ - lo_), hi_ + 0.1 * (hi_ - lo_))
-            if j == 1:  # one legend for panel c: figure legend at the bottom right
+            if j == 1:  # one legend for panel c: figure legend at the top right
                 rank = {r: i for i, r in enumerate(style.LEGEND_ORDER)}
                 order = sorted(range(len(hs)), key=lambda i: rank.get(style.role_of(hs[i].get_label()), 9))
                 fig.legend([hs[i] for i in order], [hs[i].get_label() for i in order],
-                           loc="outside lower right", fontsize=small, frameon=False,
+                           loc="outside upper right", fontsize=small, frameon=False,
                            title=(f"c: discharge {shot},  $R_\\mathrm{{tan}}$ = {rt['ti']:.2f} m" if cj["ti"] == cj["vtor"]
                                   else f"c: discharge {shot},  $R_\\mathrm{{tan}}$ = {rt['ti']:.2f} m "
                                        f"($T_\\mathrm{{i}}$), {rt['vtor']:.2f} m ($v_\\mathrm{{tor}}$)"),
@@ -1268,7 +1268,7 @@ def cmd_zeroshot(args):
             mp.set_clim(5, vmax)
         fig.colorbar(maps[0], ax=list(axes[0]), fraction=0.03, pad=0.02)
         h, l_ = axes[1, 0].get_legend_handles_labels()
-        fig.legend(h, l_, loc="outside lower center", ncol=2, frameon=False,
+        fig.legend(h, l_, loc="outside upper center", ncol=2, frameon=False,
                    columnspacing=1.0,
                    fontsize="small" if ctx == "paper" else "x-small")
         style.panel_letters(axes, x=-0.12, y=1.05)
@@ -1447,7 +1447,7 @@ def cmd_errclass(args):
             ax.text(args.core_max - 0.01, 0.97, "core", ha="right", **kw)
             ax.text(args.edge_min + 0.01, 0.97, "edge", ha="left", **kw)
         h, l_ = axes[0].get_legend_handles_labels()
-        fig.legend(h, l_, loc="outside lower left", ncol=2, frameon=False, fontsize=small,
+        fig.legend(h, l_, loc="outside upper left", ncol=2, frameon=False, fontsize=small,
                    handlelength=1.8, columnspacing=1.2)
         ax = axes[2]
         for name, ls in (("ti", "-"), ("vtor", "--")):
