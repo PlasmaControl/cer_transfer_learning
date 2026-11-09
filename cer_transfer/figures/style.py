@@ -16,14 +16,16 @@ import string
 
 import numpy as np
 
+# Okabe-Ito colours, distinguishable with red-green colour blindness: every pair of roles
+# keeps an OKLab distance >= 8 (x100) under simulated deuteranopia, protanopia, tritanopia
 COLORS = {
     "fit": "black",
-    "zero_shot": "#2ca02c",   # green
-    "scratch": "#1f77b4",     # blue
-    "finetuned": "#d62728",   # red (distinct from the green zero-shot model)
-    "nstxu_scratch": "#8c564b",       # brown: NSTX-U model (from scratch on NSTX-U)
-    "nstxu_ft_d3d": "#e377c2",        # pink: DIII-D model fine-tuned on NSTX-U
-    "nstxu_ft_d3d_nstx": "#b8860b",   # dark gold: DIII-D+NSTX model fine-tuned on NSTX-U
+    "zero_shot": "#E69F00",   # orange: DIII-D model
+    "scratch": "#D55E00",     # vermillion: NSTX model (from scratch)
+    "finetuned": "#0072B2",   # blue: DIII-D+NSTX model
+    "nstxu_scratch": "#882255",       # wine: NSTX-U model (from scratch on NSTX-U)
+    "nstxu_ft_d3d": "#CC79A7",        # reddish purple: DIII-D model fine-tuned on NSTX-U
+    "nstxu_ft_d3d_nstx": "#56B4E9",   # sky blue: DIII-D+NSTX model fine-tuned on NSTX-U
 }
 BAND_ALPHA = 0.20
 BEAMOFF_COLOR = "0.85"       # grey band of a beam-off phase

@@ -46,9 +46,9 @@ MODES = ("finetune", "scratch")
 MODEL_NAME = {"finetune": "DIII-D+NSTX model (fine-tuned)", "scratch": "NSTX model (from scratch)"}
 WINDOWS = [(i, j) for i in range(5) for j in range(i, 5)]  # 15 windows of consecutive campaigns
 VMIN, VMAX = 0.60, 0.90
-# white -> model colour -> dark model colour (fine-tuned red, from scratch blue, as in the other figures)
-CMAP = {"finetune": LinearSegmentedColormap.from_list("r2_ft", ["#ffffff", style.COLORS["finetuned"], "#5c0f10"]),
-        "scratch": LinearSegmentedColormap.from_list("r2_sc", ["#ffffff", style.COLORS["scratch"], "#0b2f4d"])}
+# white -> model colour -> dark model colour (fine-tuned blue, from scratch vermillion, as in the other figures)
+CMAP = {"finetune": LinearSegmentedColormap.from_list("r2_ft", ["#ffffff", style.COLORS["finetuned"], "#00304d"]),
+        "scratch": LinearSegmentedColormap.from_list("r2_sc", ["#ffffff", style.COLORS["scratch"], "#5c2800"])}
 TRAIN_GREY = "0.35"
 
 
